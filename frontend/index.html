@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="fluxlight">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>FluxSearch</title>
+    <script>
+      // 首屏前确定主题，避免闪烁
+      ;(function () {
+        var mode = null
+        try {
+          mode = window.localStorage.getItem('fluxsearch-theme')
+        } catch (e) {}
+        if (mode !== 'light' && mode !== 'dark') {
+          mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        document.documentElement.dataset.theme = mode === 'dark' ? 'fluxdark' : 'fluxlight'
+        document.documentElement.style.colorScheme = mode
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

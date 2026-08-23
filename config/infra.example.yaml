@@ -1,0 +1,68 @@
+# FluxSearch 基础设施连接信息（YAML 模板）
+# 复制为 config/local/infra.yaml 并填入实际值
+
+server:
+  host: your-k8s-node.example.com
+  user: deploy
+  ssh_port: 22
+
+kubernetes:
+  namespace: fluxsearch
+  kubeconfig_remote: /home/deploy/.kube/config
+  secret_name: fluxsearch-infra
+
+proxy:
+  socks5: 127.0.0.1:10808
+  http: ""
+  tunnel_remote_port: 11080
+
+postgresql:
+  host: postgres.fluxsearch.svc.cluster.local
+  port: 5432
+  user: fluxsearch
+  password: ""          # 填入实际密码
+  database: fluxsearch
+
+redis:
+  host: redis.fluxsearch.svc.cluster.local
+  port: 6379
+  password: ""          # 填入实际密码
+  db: 0
+
+minio:
+  endpoint: minio.fluxsearch.svc.cluster.local:9000
+  access_key: ""      # 填入实际 key
+  secret_key: ""      # 填入实际 secret
+  bucket: milvus-bucket
+  use_ssl: false
+  console_port: 9001
+
+milvus:
+  host: milvus.fluxsearch.svc.cluster.local
+  port: 19530
+  uri: http://milvus.fluxsearch.svc.cluster.local:19530
+
+etcd:
+  host: etcd.fluxsearch.svc.cluster.local
+  port: 2379
+  endpoints: etcd.fluxsearch.svc.cluster.local:2379
+
+# 本地开发：kubectl port-forward 后的地址
+local_dev:
+  postgres:
+    host: 127.0.0.1
+    port: 5432
+  redis:
+    host: 127.0.0.1
+    port: 6379
+  milvus:
+    host: 127.0.0.1
+    port: 19530
+  minio:
+    endpoint: 127.0.0.1:9000
+
+port_forward:
+  postgres: "kubectl port-forward -n fluxsearch svc/postgres 5432:5432"
+  redis: "kubectl port-forward -n fluxsearch svc/redis 6379:6379"
+  milvus: "kubectl port-forward -n fluxsearch svc/milvus 19530:19530"
+  minio: "kubectl port-forward -n fluxsearch svc/minio 9000:9000"

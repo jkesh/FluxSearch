@@ -1,0 +1,35 @@
+# Local environment & secrets (keep templates tracked)
+config/local/infra.env
+config/local/infra.yaml
+config/local/infra.json
+config/local/app.settings.json
+*.local.env
+*.local.yaml
+*.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Go
+bin/
+*.exe
+fluxsearch-ensure-milvus
+fluxsearch-monitor
+*.test
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

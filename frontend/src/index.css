@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-base-200 font-sans text-base-content;
+  }
+
+  ::selection {
+    @apply bg-primary/25;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--p) / 0.55);
+    outline-offset: 2px;
+  }
+
+  /* 细滚动条，接近 IDE 风格 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--bc) / 0.18) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--bc) / 0.16);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--bc) / 0.3);
+    background-clip: content-box;
+    border: 2px solid transparent;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-xl border border-base-300/80 bg-base-100 shadow-soft;
+  }
+
+  .surface-hover {
+    @apply transition-all duration-200 hover:-translate-y-px hover:border-primary/20 hover:shadow-lift;
+  }
+
+  /* 百炼风格大输入框 */
+  .composer-card {
+    @apply rounded-2xl border border-base-300/90 bg-base-100 shadow-soft transition-shadow duration-200;
+  }
+
+  .composer-card:focus-within {
+    @apply border-primary/35 shadow-[0_0_0_3px_rgba(22,119,255,0.08)];
+  }
+
+  .nav-item-active {
+    @apply bg-primary/[0.08] font-medium text-primary;
+  }
+}

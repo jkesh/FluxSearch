@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fluxsearch-monitor
+  namespace: fluxsearch
+  labels:
+    app: fluxsearch-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluxsearch-monitor
+  template:
+    metadata:
+      labels:
+        app: fluxsearch-monitor
+    spec:
+      containers:
+        - name: monitor
+          image: fluxsearch-monitor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+          envFrom:
+            - secretRef:
+                name: fluxsearch-infra
+          env:
+            - name: FLUXSEARCH_POSTGRES_HOST
+              value: postgres.fluxsearch.svc.cluster.local
+            - name: FLUXSEARCH_REDIS_HOST
+              value: redis.fluxsearch.svc.cluster.local
+            - name: FLUXSEARCH_MINIO_ENDPOINT
+              value: minio.fluxsearch.svc.cluster.local:9000
+            - name: FLUXSEARCH_MILVUS_HOST
+              value: milvus.fluxsearch.svc.cluster.local
+            - name: FLUXSEARCH_ETCD_HOST
+              value: etcd.fluxsearch.svc.cluster.local
+            - name: FLUXSEARCH_MONITOR_ADDR
+              value: ":8090"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluxsearch-monitor
+  namespace: fluxsearch
+spec:
+  type: NodePort
+  selector:
+    app: fluxsearch-monitor
+  ports:
+    - port: 8090
+      targetPort: 8090
+      nodePort: 30090

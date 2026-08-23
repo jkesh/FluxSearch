@@ -1,0 +1,531 @@
+package settings
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+
+	"github.com/fluxsearch/fluxsearch/internal/config"
+)
+
+const maskedSecret = "********"
+
+// AppSettings 可通过 UI 动态修改的运行时配置（持久化到 app.settings.json）
+type AppSettings struct {
+	MonitorURL string `json:"monitor_url"`
+
+	EmbeddingProvider     string `json:"embedding_provider"`
+	EmbeddingLocalBackend string `json:"embedding_local_backend"`
+	EmbeddingAPIURL       string `json:"embedding_api_url"`
+	EmbeddingAPIKey       string `json:"embedding_api_key,omitempty"`
+	EmbeddingModel        string `json:"embedding_model"`
+	EmbeddingDim          int    `json:"embedding_dim"`
+	EmbeddingBatchSize    int    `json:"embedding_batch_size"`
+
+	LLMProvider     string  `json:"llm_provider"`
+	LLMLocalBackend string  `json:"llm_local_backend"`
+	LLMAPIURL       string  `json:"llm_api_url"`
+	LLMAPIKey       string  `json:"llm_api_key,omitempty"`
+	LLMModel        string  `json:"llm_model"`
+	LLMTemperature  float64 `json:"llm_temperature"`
+	LLMMaxTokens    int     `json:"llm_max_tokens"`
+
+	ChunkMaxChars int `json:"chunk_max_chars"`
+	ChunkOverlap  int `json:"chunk_overlap"`
+
+	SearchTopK           int     `json:"search_top_k"`
+	SearchScoreThreshold float64 `json:"search_score_threshold"`
+
+	MilvusIndexType          string `json:"milvus_index_type"`
+	MilvusMetric             string `json:"milvus_metric"`
+	MilvusNList              int    `json:"milvus_nlist"`
+	MilvusNProbe             int    `json:"milvus_nprobe"`
+	MilvusHNSWM              int    `json:"milvus_hnsw_m"`
+	MilvusHNSWEfConstruction int    `json:"milvus_hnsw_ef_construction"`
+	MilvusHNSWEf             int    `json:"milvus_hnsw_ef"`
+
+	DocumentDedupEnabled       bool   `json:"document_dedup_enabled"`
+	DocumentDedupMode          string `json:"document_dedup_mode"`
+	DocumentDedupByContentHash bool   `json:"document_dedup_by_content_hash"`
+	DocumentDedupBySourceURI   bool   `json:"document_dedup_by_source_uri"`
+	ChunkDedupEnabled          bool   `json:"chunk_dedup_enabled"`
+	ChunkDedupScope            string `json:"chunk_dedup_scope"`
+}
+
+// PublicView 返回给前端的视图（密钥脱敏）
+type PublicView struct {
+	AppSettings
+	EmbeddingAPIKeySet bool   `json:"embedding_api_key_set"`
+	LLMAPIKeySet       bool   `json:"llm_api_key_set"`
+	SettingsPath       string `json:"settings_path"`
+	EmbeddingReady     bool         `json:"embedding_ready"`
+	EmbeddingStatus    string       `json:"embedding_status"`
+	Reindex            ReindexView  `json:"reindex"`
+}
+
+type ReindexView struct {
+	Running   bool   `json:"running"`
+	Total     int    `json:"total"`
+	Done      int    `json:"done"`
+	Failed    int    `json:"failed"`
+	LastError string `json:"last_error,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+type Manager struct {
+	mu   sync.RWMutex
+	path string
+	data AppSettings
+}
+
+func NewManager() *Manager {
+	m := &Manager{path: resolveSettingsPath()}
+	m.data = m.defaultsFromEnv()
+	if err := m.loadFromFile(); err != nil && !os.IsNotExist(err) {
+		// 文件损坏时仍使用 env 默认值
+	}
+	m.applyToEnv(m.data)
+	return m
+}
+
+func resolveSettingsPath() string {
+	candidates := []string{
+		"config/local/app.settings.json",
+		"../config/local/app.settings.json",
+		filepath.Join("..", "..", "config", "local", "app.settings.json"),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return candidates[0]
+}
+
+func (m *Manager) Path() string {
+	return m.path
+}
+
+func (m *Manager) defaultsFromEnv() AppSettings {
+	cfg := config.Load()
+	d := defaultDedupSettings()
+	return AppSettings{
+		MonitorURL: envOr("FLUXSEARCH_MONITOR_URL", ""),
+
+		EmbeddingProvider:     cfg.EmbeddingProvider,
+		EmbeddingLocalBackend: cfg.EmbeddingLocalBackend,
+		EmbeddingAPIURL:       cfg.EmbeddingAPIURL,
+		EmbeddingAPIKey:       cfg.EmbeddingAPIKey,
+		EmbeddingModel:        cfg.EmbeddingModel,
+		EmbeddingDim:          nonZeroInt(cfg.EmbeddingDim, config.DefaultEmbeddingDim),
+		EmbeddingBatchSize:    nonZeroInt(cfg.EmbeddingBatchSize, config.DefaultEmbeddingBatch),
+
+		LLMProvider:     envOr("FLUXSEARCH_LLM_PROVIDER", ""),
+		LLMLocalBackend: envOr("FLUXSEARCH_LLM_LOCAL_BACKEND", "ollama"),
+		LLMAPIURL:       envOr("FLUXSEARCH_LLM_API_URL", ""),
+		LLMAPIKey:       envOr("FLUXSEARCH_LLM_API_KEY", ""),
+		LLMModel:        envOr("FLUXSEARCH_LLM_MODEL", ""),
+		LLMTemperature:  envFloat("FLUXSEARCH_LLM_TEMPERATURE", 0.7),
+		LLMMaxTokens:    envInt("FLUXSEARCH_LLM_MAX_TOKENS", 2048),
+
+		ChunkMaxChars: nonZeroInt(cfg.ChunkMaxChars, config.DefaultChunkMaxChars),
+		ChunkOverlap:  cfg.ChunkOverlap,
+
+		SearchTopK:           envInt("FLUXSEARCH_SEARCH_TOP_K", 5),
+		SearchScoreThreshold: envFloat("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", 0),
+
+		MilvusIndexType:          envOr("FLUXSEARCH_MILVUS_INDEX_TYPE", "ivf_flat"),
+		MilvusMetric:             envOr("FLUXSEARCH_MILVUS_METRIC", "IP"),
+		MilvusNList:              envInt("FLUXSEARCH_MILVUS_NLIST", 128),
+		MilvusNProbe:             envInt("FLUXSEARCH_MILVUS_NPROBE", 16),
+		MilvusHNSWM:              envInt("FLUXSEARCH_MILVUS_HNSW_M", 16),
+		MilvusHNSWEfConstruction: envInt("FLUXSEARCH_MILVUS_HNSW_EF_CONSTRUCTION", 200),
+		MilvusHNSWEf:             envInt("FLUXSEARCH_MILVUS_HNSW_EF", 64),
+
+		DocumentDedupEnabled:       d.DocumentDedupEnabled,
+		DocumentDedupMode:          d.DocumentDedupMode,
+		DocumentDedupByContentHash: d.DocumentDedupByContentHash,
+		DocumentDedupBySourceURI:   d.DocumentDedupBySourceURI,
+		ChunkDedupEnabled:          d.ChunkDedupEnabled,
+		ChunkDedupScope:            d.ChunkDedupScope,
+	}
+}
+
+func (m *Manager) loadFromFile() error {
+	raw, err := os.ReadFile(m.path)
+	if err != nil {
+		return err
+	}
+	var file AppSettings
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return err
+	}
+	m.mergeFile(&file)
+	return nil
+}
+
+func (m *Manager) mergeFile(file *AppSettings) {
+	m.data.MonitorURL = file.MonitorURL
+
+	if file.EmbeddingProvider != "" {
+		m.data.EmbeddingProvider = file.EmbeddingProvider
+	}
+	if file.EmbeddingLocalBackend != "" {
+		m.data.EmbeddingLocalBackend = file.EmbeddingLocalBackend
+	}
+	if file.EmbeddingAPIURL != "" {
+		m.data.EmbeddingAPIURL = file.EmbeddingAPIURL
+	}
+	if file.EmbeddingAPIKey != "" {
+		m.data.EmbeddingAPIKey = file.EmbeddingAPIKey
+	}
+	if file.EmbeddingModel != "" {
+		m.data.EmbeddingModel = file.EmbeddingModel
+	}
+	if file.EmbeddingDim > 0 {
+		m.data.EmbeddingDim = file.EmbeddingDim
+	}
+	if file.EmbeddingBatchSize > 0 {
+		m.data.EmbeddingBatchSize = file.EmbeddingBatchSize
+	}
+
+	if file.LLMProvider != "" {
+		m.data.LLMProvider = file.LLMProvider
+	}
+	if file.LLMLocalBackend != "" {
+		m.data.LLMLocalBackend = file.LLMLocalBackend
+	}
+	if file.LLMAPIURL != "" {
+		m.data.LLMAPIURL = file.LLMAPIURL
+	}
+	if file.LLMAPIKey != "" {
+		m.data.LLMAPIKey = file.LLMAPIKey
+	}
+	if file.LLMModel != "" {
+		m.data.LLMModel = file.LLMModel
+	}
+	if file.LLMTemperature > 0 {
+		m.data.LLMTemperature = file.LLMTemperature
+	}
+	if file.LLMMaxTokens > 0 {
+		m.data.LLMMaxTokens = file.LLMMaxTokens
+	}
+
+	if file.ChunkMaxChars > 0 {
+		m.data.ChunkMaxChars = file.ChunkMaxChars
+	}
+	if file.ChunkOverlap >= 0 {
+		m.data.ChunkOverlap = file.ChunkOverlap
+	}
+	if file.SearchTopK > 0 {
+		m.data.SearchTopK = file.SearchTopK
+	}
+	if file.SearchScoreThreshold >= 0 {
+		m.data.SearchScoreThreshold = file.SearchScoreThreshold
+	}
+
+	if file.MilvusIndexType != "" {
+		m.data.MilvusIndexType = file.MilvusIndexType
+	}
+	if file.MilvusMetric != "" {
+		m.data.MilvusMetric = file.MilvusMetric
+	}
+	if file.MilvusNList > 0 {
+		m.data.MilvusNList = file.MilvusNList
+	}
+	if file.MilvusNProbe > 0 {
+		m.data.MilvusNProbe = file.MilvusNProbe
+	}
+	if file.MilvusHNSWM > 0 {
+		m.data.MilvusHNSWM = file.MilvusHNSWM
+	}
+	if file.MilvusHNSWEfConstruction > 0 {
+		m.data.MilvusHNSWEfConstruction = file.MilvusHNSWEfConstruction
+	}
+	if file.MilvusHNSWEf > 0 {
+		m.data.MilvusHNSWEf = file.MilvusHNSWEf
+	}
+
+	if file.ChunkDedupScope != "" {
+		m.data.ChunkDedupScope = file.ChunkDedupScope
+	}
+	if file.DocumentDedupMode != "" {
+		m.data.DocumentDedupEnabled = file.DocumentDedupEnabled
+		m.data.DocumentDedupByContentHash = file.DocumentDedupByContentHash
+		m.data.DocumentDedupBySourceURI = file.DocumentDedupBySourceURI
+		m.data.ChunkDedupEnabled = file.ChunkDedupEnabled
+	} else {
+		def := defaultDedupSettings()
+		m.data.DocumentDedupEnabled = def.DocumentDedupEnabled
+		m.data.DocumentDedupMode = def.DocumentDedupMode
+		m.data.DocumentDedupByContentHash = def.DocumentDedupByContentHash
+		m.data.DocumentDedupBySourceURI = def.DocumentDedupBySourceURI
+		m.data.ChunkDedupEnabled = def.ChunkDedupEnabled
+		m.data.ChunkDedupScope = def.ChunkDedupScope
+	}
+}
+
+func (m *Manager) Get() AppSettings {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.data
+}
+
+func (m *Manager) PublicView(embeddingReady bool, embeddingStatus string, reindex ReindexView) PublicView {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	view := PublicView{
+		AppSettings:        m.data.withMilvusDefaults().withDedupDefaults(),
+		SettingsPath:       m.path,
+		EmbeddingAPIKeySet: m.data.EmbeddingAPIKey != "",
+		LLMAPIKeySet:       m.data.LLMAPIKey != "",
+		EmbeddingReady:     embeddingReady,
+		EmbeddingStatus:    embeddingStatus,
+		Reindex:            reindex,
+	}
+	view.EmbeddingAPIKey = ""
+	view.LLMAPIKey = ""
+	return view
+}
+
+// UpdateInput 部分更新；密钥留空或 ******** 表示不修改
+type UpdateInput struct {
+	MonitorURL *string `json:"monitor_url"`
+
+	EmbeddingProvider     *string `json:"embedding_provider"`
+	EmbeddingLocalBackend *string `json:"embedding_local_backend"`
+	EmbeddingAPIURL       *string `json:"embedding_api_url"`
+	EmbeddingAPIKey       *string `json:"embedding_api_key"`
+	EmbeddingModel        *string `json:"embedding_model"`
+	EmbeddingDim          *int    `json:"embedding_dim"`
+	EmbeddingBatchSize    *int    `json:"embedding_batch_size"`
+
+	LLMProvider     *string  `json:"llm_provider"`
+	LLMLocalBackend *string  `json:"llm_local_backend"`
+	LLMAPIURL       *string  `json:"llm_api_url"`
+	LLMAPIKey       *string  `json:"llm_api_key"`
+	LLMModel        *string  `json:"llm_model"`
+	LLMTemperature  *float64 `json:"llm_temperature"`
+	LLMMaxTokens    *int     `json:"llm_max_tokens"`
+
+	ChunkMaxChars *int `json:"chunk_max_chars"`
+	ChunkOverlap  *int `json:"chunk_overlap"`
+
+	SearchTopK           *int     `json:"search_top_k"`
+	SearchScoreThreshold *float64 `json:"search_score_threshold"`
+
+	MilvusIndexType          *string `json:"milvus_index_type"`
+	MilvusMetric             *string `json:"milvus_metric"`
+	MilvusNList              *int    `json:"milvus_nlist"`
+	MilvusNProbe             *int    `json:"milvus_nprobe"`
+	MilvusHNSWM              *int    `json:"milvus_hnsw_m"`
+	MilvusHNSWEfConstruction *int    `json:"milvus_hnsw_ef_construction"`
+	MilvusHNSWEf             *int    `json:"milvus_hnsw_ef"`
+
+	DocumentDedupEnabled       *bool   `json:"document_dedup_enabled"`
+	DocumentDedupMode          *string `json:"document_dedup_mode"`
+	DocumentDedupByContentHash *bool   `json:"document_dedup_by_content_hash"`
+	DocumentDedupBySourceURI   *bool   `json:"document_dedup_by_source_uri"`
+	ChunkDedupEnabled          *bool   `json:"chunk_dedup_enabled"`
+	ChunkDedupScope            *string `json:"chunk_dedup_scope"`
+}
+
+func (m *Manager) Update(in UpdateInput) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if in.MonitorURL != nil {
+		m.data.MonitorURL = *in.MonitorURL
+	}
+	applyStrPtr(&m.data.EmbeddingProvider, in.EmbeddingProvider)
+	applyStrPtr(&m.data.EmbeddingLocalBackend, in.EmbeddingLocalBackend)
+	applyStrPtr(&m.data.EmbeddingAPIURL, in.EmbeddingAPIURL)
+	if in.EmbeddingAPIKey != nil && *in.EmbeddingAPIKey != "" && *in.EmbeddingAPIKey != maskedSecret {
+		m.data.EmbeddingAPIKey = *in.EmbeddingAPIKey
+	}
+	applyStrPtr(&m.data.EmbeddingModel, in.EmbeddingModel)
+	if in.EmbeddingDim != nil && *in.EmbeddingDim > 0 {
+		m.data.EmbeddingDim = *in.EmbeddingDim
+	}
+	if in.EmbeddingBatchSize != nil && *in.EmbeddingBatchSize > 0 {
+		m.data.EmbeddingBatchSize = *in.EmbeddingBatchSize
+	}
+
+	applyStrPtr(&m.data.LLMProvider, in.LLMProvider)
+	applyStrPtr(&m.data.LLMLocalBackend, in.LLMLocalBackend)
+	applyStrPtr(&m.data.LLMAPIURL, in.LLMAPIURL)
+	if in.LLMAPIKey != nil && *in.LLMAPIKey != "" && *in.LLMAPIKey != maskedSecret {
+		m.data.LLMAPIKey = *in.LLMAPIKey
+	}
+	applyStrPtr(&m.data.LLMModel, in.LLMModel)
+	if in.LLMTemperature != nil && *in.LLMTemperature >= 0 {
+		m.data.LLMTemperature = *in.LLMTemperature
+	}
+	if in.LLMMaxTokens != nil && *in.LLMMaxTokens > 0 {
+		m.data.LLMMaxTokens = *in.LLMMaxTokens
+	}
+
+	if in.ChunkMaxChars != nil && *in.ChunkMaxChars > 0 {
+		m.data.ChunkMaxChars = *in.ChunkMaxChars
+	}
+	if in.ChunkOverlap != nil && *in.ChunkOverlap >= 0 {
+		m.data.ChunkOverlap = *in.ChunkOverlap
+	}
+	if in.SearchTopK != nil && *in.SearchTopK > 0 {
+		m.data.SearchTopK = *in.SearchTopK
+	}
+	if in.SearchScoreThreshold != nil && *in.SearchScoreThreshold >= 0 {
+		m.data.SearchScoreThreshold = *in.SearchScoreThreshold
+	}
+
+	applyStrPtr(&m.data.MilvusIndexType, in.MilvusIndexType)
+	applyStrPtr(&m.data.MilvusMetric, in.MilvusMetric)
+	if in.MilvusNList != nil && *in.MilvusNList > 0 {
+		m.data.MilvusNList = *in.MilvusNList
+	}
+	if in.MilvusNProbe != nil && *in.MilvusNProbe > 0 {
+		m.data.MilvusNProbe = *in.MilvusNProbe
+	}
+	if in.MilvusHNSWM != nil && *in.MilvusHNSWM > 0 {
+		m.data.MilvusHNSWM = *in.MilvusHNSWM
+	}
+	if in.MilvusHNSWEfConstruction != nil && *in.MilvusHNSWEfConstruction > 0 {
+		m.data.MilvusHNSWEfConstruction = *in.MilvusHNSWEfConstruction
+	}
+	if in.MilvusHNSWEf != nil && *in.MilvusHNSWEf > 0 {
+		m.data.MilvusHNSWEf = *in.MilvusHNSWEf
+	}
+
+	if in.DocumentDedupEnabled != nil {
+		m.data.DocumentDedupEnabled = *in.DocumentDedupEnabled
+	}
+	applyStrPtr(&m.data.DocumentDedupMode, in.DocumentDedupMode)
+	if in.DocumentDedupByContentHash != nil {
+		m.data.DocumentDedupByContentHash = *in.DocumentDedupByContentHash
+	}
+	if in.DocumentDedupBySourceURI != nil {
+		m.data.DocumentDedupBySourceURI = *in.DocumentDedupBySourceURI
+	}
+	if in.ChunkDedupEnabled != nil {
+		m.data.ChunkDedupEnabled = *in.ChunkDedupEnabled
+	}
+	applyStrPtr(&m.data.ChunkDedupScope, in.ChunkDedupScope)
+
+	if err := m.saveLocked(); err != nil {
+		return err
+	}
+	m.applyToEnv(m.data)
+	return nil
+}
+
+func applyStrPtr(dst *string, src *string) {
+	if src != nil {
+		*dst = *src
+	}
+}
+
+func (m *Manager) saveLocked() error {
+	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(m.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.path, raw, 0o600)
+}
+
+func (m *Manager) applyToEnv(s AppSettings) {
+	setEnv("FLUXSEARCH_MONITOR_URL", s.MonitorURL)
+	setEnv("FLUXSEARCH_EMBEDDING_PROVIDER", s.EmbeddingProvider)
+	setEnv("FLUXSEARCH_EMBEDDING_LOCAL_BACKEND", s.EmbeddingLocalBackend)
+	setEnv("FLUXSEARCH_EMBEDDING_API_URL", s.EmbeddingAPIURL)
+	setEnv("FLUXSEARCH_EMBEDDING_API_KEY", s.EmbeddingAPIKey)
+	setEnv("FLUXSEARCH_EMBEDDING_MODEL", s.EmbeddingModel)
+	setEnv("FLUXSEARCH_EMBEDDING_DIM", strconv.Itoa(s.EmbeddingDim))
+	setEnv("FLUXSEARCH_EMBEDDING_BATCH_SIZE", strconv.Itoa(s.EmbeddingBatchSize))
+
+	setEnv("FLUXSEARCH_LLM_PROVIDER", s.LLMProvider)
+	setEnv("FLUXSEARCH_LLM_LOCAL_BACKEND", s.LLMLocalBackend)
+	setEnv("FLUXSEARCH_LLM_API_URL", s.LLMAPIURL)
+	setEnv("FLUXSEARCH_LLM_API_KEY", s.LLMAPIKey)
+	setEnv("FLUXSEARCH_LLM_MODEL", s.LLMModel)
+	setEnv("FLUXSEARCH_LLM_TEMPERATURE", strconv.FormatFloat(s.LLMTemperature, 'f', -1, 64))
+	setEnv("FLUXSEARCH_LLM_MAX_TOKENS", strconv.Itoa(s.LLMMaxTokens))
+
+	setEnv("FLUXSEARCH_CHUNK_MAX_CHARS", strconv.Itoa(s.ChunkMaxChars))
+	setEnv("FLUXSEARCH_CHUNK_OVERLAP", strconv.Itoa(s.ChunkOverlap))
+	setEnv("FLUXSEARCH_SEARCH_TOP_K", strconv.Itoa(s.SearchTopK))
+	setEnv("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", strconv.FormatFloat(s.SearchScoreThreshold, 'f', -1, 64))
+
+	setEnv("FLUXSEARCH_MILVUS_INDEX_TYPE", s.MilvusIndexType)
+	setEnv("FLUXSEARCH_MILVUS_METRIC", s.MilvusMetric)
+	setEnv("FLUXSEARCH_MILVUS_NLIST", strconv.Itoa(s.MilvusNList))
+	setEnv("FLUXSEARCH_MILVUS_NPROBE", strconv.Itoa(s.MilvusNProbe))
+	setEnv("FLUXSEARCH_MILVUS_HNSW_M", strconv.Itoa(s.MilvusHNSWM))
+	setEnv("FLUXSEARCH_MILVUS_HNSW_EF_CONSTRUCTION", strconv.Itoa(s.MilvusHNSWEfConstruction))
+	setEnv("FLUXSEARCH_MILVUS_HNSW_EF", strconv.Itoa(s.MilvusHNSWEf))
+}
+
+func (m *Manager) ToConfig() config.Config {
+	s := m.Get()
+	cfg := config.Load()
+	cfg.EmbeddingProvider = s.EmbeddingProvider
+	cfg.EmbeddingLocalBackend = s.EmbeddingLocalBackend
+	cfg.EmbeddingAPIURL = s.EmbeddingAPIURL
+	cfg.EmbeddingAPIKey = s.EmbeddingAPIKey
+	cfg.EmbeddingModel = s.EmbeddingModel
+	cfg.EmbeddingDim = s.EmbeddingDim
+	cfg.EmbeddingBatchSize = s.EmbeddingBatchSize
+	cfg.ChunkMaxChars = s.ChunkMaxChars
+	cfg.ChunkOverlap = s.ChunkOverlap
+	return cfg
+}
+
+func (m *Manager) MonitorURL() string {
+	return m.Get().MonitorURL
+}
+
+func setEnv(key, val string) {
+	_ = os.Setenv(key, val)
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func nonZeroInt(v, fallback int) int {
+	if v <= 0 {
+		return fallback
+	}
+	return v
+}
