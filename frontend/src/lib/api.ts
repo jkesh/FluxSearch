@@ -78,6 +78,33 @@ export interface DocumentListResponse {
   offset: number
 }
 
+export interface Collection {
+  id: string
+  name: string
+  description?: string
+  embedding_model: string
+  milvus_collection: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CollectionListResponse {
+  collections: Collection[]
+}
+
+export const DEFAULT_COLLECTION_ID = '00000000-0000-0000-0000-000000000001'
+
+export function collectionLabel(c: Collection): string {
+  switch (c.name) {
+    case 'default':
+      return '默认知识库'
+    case 'eval-cqadupstack-unix':
+      return '评测 · CQADupStack Unix'
+    default:
+      return c.description?.trim() || c.name
+  }
+}
+
 export interface ImportDocumentResponse {
   document_id: string
   title: string
@@ -157,6 +184,11 @@ export interface AppSettings {
   chunk_overlap: number
   search_top_k: number
   search_score_threshold: number
+  search_hybrid_enabled: boolean
+  search_recall_k: number
+  search_rerank_enabled: boolean
+  rerank_api_url: string
+  rerank_model: string
   milvus_index_type: string
   milvus_metric: string
   milvus_nlist: number
@@ -164,6 +196,8 @@ export interface AppSettings {
   milvus_hnsw_m: number
   milvus_hnsw_ef_construction: number
   milvus_hnsw_ef: number
+  milvus_sparse_drop_ratio_build: number
+  milvus_sparse_drop_ratio_search: number
   document_dedup_enabled: boolean
   document_dedup_mode: string
   document_dedup_by_content_hash: boolean
@@ -428,8 +462,23 @@ export async function updateSettings(payload: AppSettingsUpdate): Promise<Update
   return res.json()
 }
 
-export async function listDocuments(limit = 50, offset = 0): Promise<DocumentListResponse> {
-  const res = await fetch(`${API_BASE}/documents?limit=${limit}&offset=${offset}`)
+export async function listCollections(): Promise<CollectionListResponse> {
+  const res = await fetch(`${API_BASE}/collections`)
+  if (!res.ok) await parseError(res)
+  return res.json()
+}
+
+export async function listDocuments(
+  limit = 50,
+  offset = 0,
+  collectionId = DEFAULT_COLLECTION_ID,
+): Promise<DocumentListResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    collection_id: collectionId,
+  })
+  const res = await fetch(`${API_BASE}/documents?${params}`)
   if (!res.ok) await parseError(res)
   return res.json()
 }
@@ -440,10 +489,29 @@ export async function getDocument(id: string): Promise<DocumentDetailResponse> {
   return res.json()
 }
 
-export async function rechunkDocument(id: string): Promise<RechunkResponse> {
-  const res = await fetch(`${API_BASE}/documents/${id}/rechunk`, { method: 'POST' })
+export async function rechunkDocument(
+  id: string,
+  async = false,
+): Promise<RechunkResponse | AsyncTaskResponse> {
+  const res = await fetch(`${API_BASE}/documents/${id}/rechunk${async ? '?async=true' : ''}`, { method: 'POST' })
   if (!res.ok) await parseError(res)
   return res.json()
+}
+
+export async function reimportDocument(id: string, file: File, sourceType?: string): Promise<AsyncTaskResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  if (sourceType?.trim()) form.append('source_type', sourceType.trim())
+
+  const res = await fetch(`${API_BASE}/documents/${id}/reimport`, { method: 'POST', body: form })
+  if (!res.ok) await parseError(res)
+  return res.json()
+}
+
+export interface AsyncTaskResponse {
+  message: string
+  document_id: string
+  async: boolean
 }
 
 export async function importDocumentFile(file: File, title?: string): Promise<ImportDocumentResponse> {

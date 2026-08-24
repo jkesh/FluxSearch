@@ -112,6 +112,32 @@ export default function SearchPanel({ form, patch }: Props) {
       </Section>
 
       <Section title="检索默认参数">
+        <Field label="Hybrid 检索（Dense + Sparse）" hint="BGE-M3 专用；开启后需重建 Collection 并重嵌入">
+          <input
+            type="checkbox"
+            className="toggle toggle-primary"
+            checked={form.search_hybrid_enabled}
+            onChange={(e) => patch('search_hybrid_enabled', e.target.checked)}
+          />
+        </Field>
+        <Field label="Cross-Encoder 重排" hint="召回后用 bge-reranker 精排">
+          <input
+            type="checkbox"
+            className="toggle toggle-primary"
+            checked={form.search_rerank_enabled}
+            onChange={(e) => patch('search_rerank_enabled', e.target.checked)}
+          />
+        </Field>
+        <Field label="召回 Top K" hint="Hybrid/Rerank 前的候选数量">
+          <input
+            type="number"
+            className="input input-bordered input-sm w-full"
+            value={form.search_recall_k}
+            min={form.search_top_k}
+            max={200}
+            onChange={(e) => patch('search_recall_k', Number(e.target.value))}
+          />
+        </Field>
         <Field label="默认 Top K">
           <input
             type="number"
@@ -132,6 +158,15 @@ export default function SearchPanel({ form, patch }: Props) {
             onChange={(e) => patch('search_score_threshold', Number(e.target.value))}
           />
         </Field>
+        {form.search_rerank_enabled && (
+          <Field label="Reranker 模型">
+            <input
+              className="input input-bordered input-sm w-full"
+              value={form.rerank_model}
+              onChange={(e) => patch('rerank_model', e.target.value)}
+            />
+          </Field>
+        )}
       </Section>
     </div>
   )

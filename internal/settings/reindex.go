@@ -37,6 +37,14 @@ func DetectReindexPlan(before, after AppSettings) ReindexPlan {
 		reasons = append(reasons, "Milvus 索引结构变更")
 	}
 
+	if before.SearchHybridEnabled != after.SearchHybridEnabled {
+		plan.RecreateCollection = true
+		if !plan.RechunkAll {
+			plan.ReembedAll = true
+		}
+		reasons = append(reasons, "Hybrid 检索开关变更")
+	}
+
 	if plan.RechunkAll {
 		plan.ReembedAll = false
 	}
@@ -55,11 +63,14 @@ func embeddingVectorSpaceChanged(before, after AppSettings) bool {
 }
 
 func milvusStructureChanged(before, after AppSettings) bool {
+	before = before.withMilvusDefaults().withSearchDefaults()
+	after = after.withMilvusDefaults().withSearchDefaults()
 	return before.MilvusIndexType != after.MilvusIndexType ||
 		before.MilvusMetric != after.MilvusMetric ||
 		before.MilvusNList != after.MilvusNList ||
 		before.MilvusHNSWM != after.MilvusHNSWM ||
-		before.MilvusHNSWEfConstruction != after.MilvusHNSWEfConstruction
+		before.MilvusHNSWEfConstruction != after.MilvusHNSWEfConstruction ||
+		before.MilvusSparseDropRatioBuild != after.MilvusSparseDropRatioBuild
 }
 
 func (s AppSettings) withMilvusDefaults() AppSettings {

@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/fluxsearch/fluxsearch/internal/api/ws"
 	"github.com/fluxsearch/fluxsearch/internal/bootstrap"
 	"github.com/fluxsearch/fluxsearch/internal/document"
+	"github.com/fluxsearch/fluxsearch/internal/events"
 	"github.com/fluxsearch/fluxsearch/internal/storage/postgres"
-	"github.com/fluxsearch/fluxsearch/internal/api/ws"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -124,6 +125,10 @@ func (h *Handler) DeleteDocument(c *gin.Context) {
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if h.stores.Events != nil {
+		_ = h.stores.Events.Publish(c.Request.Context(), events.DocumentDeleted(id.String()))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "document deleted", "document_id": id})

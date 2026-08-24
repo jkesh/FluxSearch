@@ -17,7 +17,8 @@ JSON 请求使用 `Content-Type: application/json`；文件上传使用 `multipa
 | POST | `/api/v1/documents` | 上传文档（同步） |
 | POST | `/api/v1/documents/batch` | 批量上传（同步） |
 | DELETE | `/api/v1/documents/:id` | 删除文档 |
-| POST | `/api/v1/documents/:id/rechunk` | 重新分块 |
+| POST | `/api/v1/documents/:id/rechunk` | 重新分块（`?async=true` 异步） |
+| POST | `/api/v1/documents/:id/reimport` | 异步重新导入（替换原文并重建索引） |
 | POST | `/api/v1/import/jobs` | 创建异步导入任务 |
 | GET | `/api/v1/import/jobs` | 导入任务列表 |
 | GET | `/api/v1/import/jobs/:id` | 导入任务详情 |
@@ -33,7 +34,17 @@ JSON 请求使用 `Content-Type: application/json`；文件上传使用 `multipa
 | 路径 | 说明 |
 |------|------|
 | `WS /api/v1/ws/chat` | RAG 流式对话 |
-| `WS /api/v1/ws/events` | 导入进度等事件 |
+| `WS /api/v1/ws/events` | 导入进度、文档生命周期与重索引事件 |
+
+**事件类型（`ws/events`）**
+
+| type | 说明 |
+|------|------|
+| `import_progress` | 异步导入任务进度（含 `job` 对象） |
+| `document.created` | 文档导入完成 |
+| `document.updated` | 文档更新或重索引完成 |
+| `document.deleted` | 文档已删除 |
+| `document.reindex` | 重导入/重分块队列状态（`status`: queued / processing / failed） |
 
 开发环境：`ws://localhost:5173/api/v1/ws/chat`（Vite 代理）
 

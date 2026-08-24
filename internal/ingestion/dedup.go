@@ -52,6 +52,17 @@ const (
 	dedupReplace
 )
 
+func dedupActionForExisting(doc document.Document, cfg DedupConfig) dedupAction {
+	if doc.Status == document.StatusIndexed {
+		return dedupSkip
+	}
+	// Failed/pending/processing leftovers should be re-indexed, not skipped.
+	if cfg.DocumentMode == settings.DocumentDedupModeReplace || doc.Status == document.StatusFailed || doc.Status == document.StatusPending {
+		return dedupReplace
+	}
+	return dedupReplace
+}
+
 func (s *Service) resolveDocumentDedup(
 	ctx context.Context,
 	collectionID uuid.UUID,
@@ -65,7 +76,7 @@ func (s *Service) resolveDocumentDedup(
 	if cfg.DocumentByContentHash && contentHash != "" {
 		doc, err := s.pg.FindDocumentByContentHash(ctx, collectionID, contentHash)
 		if err == nil {
-			return dedupSkip, &doc, nil
+			return dedupActionForExisting(doc, cfg), &doc, nil
 		}
 		if !pgstore.IsNotFound(err) {
 			return dedupNone, nil, err
@@ -76,7 +87,7 @@ func (s *Service) resolveDocumentDedup(
 		doc, err := s.pg.FindDocumentBySourceURI(ctx, collectionID, sourceURI)
 		if err == nil {
 			if doc.ContentHash == contentHash {
-				return dedupSkip, &doc, nil
+				return dedupActionForExisting(doc, cfg), &doc, nil
 			}
 			if cfg.DocumentMode == settings.DocumentDedupModeReplace {
 				return dedupReplace, &doc, nil

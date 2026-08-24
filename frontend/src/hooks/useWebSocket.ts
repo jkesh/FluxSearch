@@ -18,6 +18,9 @@ export type WSMessage = {
   conversation_id?: string
   message_id?: string
   job?: unknown
+  document_id?: string
+  status?: string
+  message?: string
 }
 
 type Options = {

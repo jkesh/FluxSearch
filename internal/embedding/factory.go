@@ -110,11 +110,12 @@ func newLlamaCPP(opts Options) (Embedder, error) {
 		model = "bge-m3"
 	}
 	return NewOpenAICompatible(OpenAICompatibleConfig{
-		Provider:  ProviderLlamaCPP,
-		BaseURL:   baseURL,
-		APIKey:    opts.APIKey, // llama-server 通常不需要
-		Model:     model,
-		Dimension: opts.Dimension,
-		BatchSize: opts.BatchSize,
+		Provider:        ProviderLlamaCPP,
+		BaseURL:         baseURL,
+		APIKey:          opts.APIKey, // llama-server 通常不需要
+		Model:           model,
+		Dimension:       opts.Dimension,
+		BatchSize:       opts.BatchSize,
+		HybridSupported: true,
 	})
 }

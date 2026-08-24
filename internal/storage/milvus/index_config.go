@@ -20,6 +20,9 @@ const (
 	DefaultHNSWM              = 16
 	DefaultHNSWEfConstruction = 200
 	DefaultHNSWEf             = 64
+
+	DefaultSparseDropRatioBuild  = 0.2
+	DefaultSparseDropRatioSearch = 0.0
 )
 
 type IndexConfig struct {
@@ -31,6 +34,9 @@ type IndexConfig struct {
 	HNSWEfConstruction int
 	HNSWEf             int
 	ScoreThreshold     float32
+	HybridEnabled           bool
+	SparseDropRatioBuild    float64
+	SparseDropRatioSearch   float64
 }
 
 func DefaultIndexConfig() IndexConfig {
@@ -58,13 +64,17 @@ func (c IndexConfig) MetricType() entity.MetricType {
 }
 
 func (c IndexConfig) IndexSignature() string {
-	return strings.Join([]string{
+	parts := []string{
 		strings.ToLower(c.IndexType),
 		strings.ToUpper(c.Metric),
 		strconv.Itoa(c.NList),
 		strconv.Itoa(c.HNSWM),
 		strconv.Itoa(c.HNSWEfConstruction),
-	}, "|")
+	}
+	if c.HybridEnabled {
+		parts = append(parts, "hybrid", strconv.FormatFloat(c.SparseDropRatioBuild, 'f', 2, 64))
+	}
+	return strings.Join(parts, "|")
 }
 
 func (c IndexConfig) Normalized() IndexConfig {
@@ -89,6 +99,12 @@ func (c IndexConfig) Normalized() IndexConfig {
 	}
 	if out.HNSWEf <= 0 {
 		out.HNSWEf = DefaultHNSWEf
+	}
+	if out.SparseDropRatioBuild < 0 {
+		out.SparseDropRatioBuild = DefaultSparseDropRatioBuild
+	}
+	if out.SparseDropRatioSearch < 0 {
+		out.SparseDropRatioSearch = DefaultSparseDropRatioSearch
 	}
 	return out
 }

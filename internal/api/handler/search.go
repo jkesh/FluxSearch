@@ -38,19 +38,11 @@ func (h *Handler) Search(c *gin.Context) {
 		topK = 5
 	}
 
-	if h.stores.Embedder == nil {
+	if h.stores.Retrieval == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"query":   req.Query,
 			"results": []searchResultItem{},
-			"message": "embedding not configured",
-		})
-		return
-	}
-	if h.stores.Milvus == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"query":   req.Query,
-			"results": []searchResultItem{},
-			"message": "milvus unavailable",
+			"message": "retrieval unavailable",
 		})
 		return
 	}
@@ -61,47 +53,10 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	collectionName := "fluxsearch_default"
-	if h.stores.Postgres != nil {
-		if coll, err := h.stores.Postgres.GetCollectionByID(c.Request.Context(), collectionID); err == nil {
-			collectionName = coll.MilvusCollection
-		}
-	}
-
-	vectors, err := h.stores.Embedder.Embed(c.Request.Context(), []string{req.Query})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "embed query: " + err.Error()})
-		return
-	}
-	if len(vectors) == 0 {
-		c.JSON(http.StatusOK, gin.H{"query": req.Query, "results": []searchResultItem{}, "top_k": topK})
-		return
-	}
-
-	hits, err := h.stores.Milvus.Search(c.Request.Context(), collectionName, vectors[0], topK)
+	hits, mode, err := h.stores.Retrieval.Search(c.Request.Context(), collectionID, req.Query, topK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	docIDs := make([]uuid.UUID, 0, len(hits))
-	seen := make(map[uuid.UUID]struct{}, len(hits))
-	for _, hit := range hits {
-		if _, ok := seen[hit.DocumentID]; ok {
-			continue
-		}
-		seen[hit.DocumentID] = struct{}{}
-		docIDs = append(docIDs, hit.DocumentID)
-	}
-
-	titles := map[uuid.UUID]string{}
-	if h.stores.Postgres != nil && len(docIDs) > 0 {
-		docs, err := h.stores.Postgres.GetDocumentsByIDs(c.Request.Context(), docIDs)
-		if err == nil {
-			for id, doc := range docs {
-				titles[id] = doc.Title
-			}
-		}
 	}
 
 	results := make([]searchResultItem, 0, len(hits))
@@ -109,7 +64,7 @@ func (h *Handler) Search(c *gin.Context) {
 		results = append(results, searchResultItem{
 			ChunkID:       hit.ChunkID,
 			DocumentID:    hit.DocumentID,
-			DocumentTitle: titles[hit.DocumentID],
+			DocumentTitle: hit.DocumentTitle,
 			Content:       hit.Content,
 			Score:         hit.Score,
 			Page:          hit.Page,
@@ -117,10 +72,18 @@ func (h *Handler) Search(c *gin.Context) {
 		})
 	}
 
+	collectionName := "fluxsearch_default"
+	if h.stores.Postgres != nil {
+		if coll, err := h.stores.Postgres.GetCollectionByID(c.Request.Context(), collectionID); err == nil {
+			collectionName = coll.MilvusCollection
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"query":      req.Query,
 		"top_k":      topK,
 		"collection": collectionName,
+		"mode":       mode,
 		"count":      len(results),
 		"results":    results,
 	})

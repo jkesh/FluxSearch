@@ -5,7 +5,7 @@
 ```text
 ✅ K8s 基础设施（PostgreSQL / Redis / MinIO / Milvus / etcd）
 ✅ V0 Minimal RAG（导入 / 检索 / 对话 / 对话历史）
-🚧 V1 实时摄取（部分：Redis 队列、MinIO、WS 进度；缺 Kafka、独立 Worker）
+✅ V1 实时摄取（Redis 事件总线、独立 Worker、异步重索引）
 ⏳ V2 ~ V7
 ```
 
@@ -28,17 +28,19 @@
 - [x] 文档删除、文档/片段去重、设置页、Reindex 协调器
 - [x] MinIO 原文件存储
 
-## V1 — Realtime Ingestion 🚧
+## V1 — Realtime Ingestion ✅
 
 目标：文档增删改实时反映到索引。
 
 - [x] PostgreSQL 文档元数据 + migrations
 - [x] MinIO 原始文件存储
-- [x] Redis 导入队列 + API 内 Worker
-- [x] WebSocket 导入进度推送（`/ws/events`）
-- [ ] Kafka 事件发布与消费
-- [ ] `cmd/worker` 独立进程（当前摄取在 API 内完成）
-- [ ] 文档更新增量索引（目前以重导入 / rechunk 为主）
+- [x] Redis 导入队列 + 可选 API 内 Worker（`FLUXSEARCH_IMPORT_WORKER_IN_API`）
+- [x] `cmd/worker` 独立进程（导入 + 重索引双队列）
+- [x] Redis Pub/Sub 领域事件（`fluxsearch:events`，Kafka 兼容 schema，可后续迁移）
+- [x] WebSocket 事件推送（`/ws/events`：导入进度、文档创建/更新/删除、重索引状态）
+- [x] 异步重新导入 `POST /documents/:id/reimport`
+- [x] 异步重新分块 `POST /documents/:id/rechunk?async=true`
+- [ ] Kafka 事件发布与消费（当前以 Redis Pub/Sub 代替）
 
 ## V2 — Hybrid Retrieval
 
@@ -97,7 +99,7 @@
 | 阶段 | 状态 | 预估工期（1 人全职） |
 |------|------|---------------------|
 | V0 | ✅ 基本完成 | 2~3 周 |
-| V1 | 🚧 进行中 | 2~3 周 |
+| V1 | ✅ 基本完成 | 2~3 周 |
 | V2~V3 | ⏳ | 3~4 周 |
 | V4 | ⏳ | 2~3 周 |
 | V5~V7 | ⏳ | 按需推进 |

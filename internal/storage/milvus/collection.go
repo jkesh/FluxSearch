@@ -14,6 +14,7 @@ const (
 	FieldDocumentVersion       = "document_version"
 	FieldContent               = "content"
 	FieldDenseVector           = "dense_vector"
+	FieldSparseVector          = "sparse_vector"
 	FieldPage                  = "page"
 	FieldSection               = "section"
 	FieldEmbeddingModelVersion = "embedding_model_version"
@@ -89,6 +90,15 @@ func (s *Store) createCollection(ctx context.Context, name string) error {
 		},
 	}
 
+	if idx.HybridEnabled {
+		schema.Fields = append(schema.Fields[:5], append([]*entity.Field{
+			{
+				Name:     FieldSparseVector,
+				DataType: entity.FieldTypeSparseVector,
+			},
+		}, schema.Fields[5:]...)...)
+	}
+
 	if err := s.client.CreateCollection(ctx, schema, 1); err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
@@ -99,6 +109,16 @@ func (s *Store) createCollection(ctx context.Context, name string) error {
 	}
 	if err := s.client.CreateIndex(ctx, name, FieldDenseVector, index, false); err != nil {
 		return fmt.Errorf("create index: %w", err)
+	}
+
+	if idx.HybridEnabled {
+		sparseIndex, err := entity.NewIndexSparseInverted(entity.IP, idx.SparseDropRatioBuild)
+		if err != nil {
+			return fmt.Errorf("new sparse index: %w", err)
+		}
+		if err := s.client.CreateIndex(ctx, name, FieldSparseVector, sparseIndex, false); err != nil {
+			return fmt.Errorf("create sparse index: %w", err)
+		}
 	}
 
 	return s.client.LoadCollection(ctx, name, false)
@@ -122,7 +142,36 @@ func (s *Store) DropCollection(ctx context.Context, name string) error {
 	if !exists {
 		return nil
 	}
+	_ = s.client.ReleaseCollection(ctx, name)
 	return s.client.DropCollection(ctx, name)
+}
+
+func (s *Store) CollectionVectorDim(ctx context.Context, name string) (int, error) {
+	exists, err := s.client.HasCollection(ctx, name)
+	if err != nil {
+		return 0, fmt.Errorf("has collection: %w", err)
+	}
+	if !exists {
+		return 0, fmt.Errorf("collection %q not found", name)
+	}
+	coll, err := s.client.DescribeCollection(ctx, name)
+	if err != nil {
+		return 0, fmt.Errorf("describe collection: %w", err)
+	}
+	for _, field := range coll.Schema.Fields {
+		if field.Name == FieldDenseVector {
+			dimStr, ok := field.TypeParams[entity.TypeParamDim]
+			if !ok {
+				return 0, fmt.Errorf("dense_vector dim not found")
+			}
+			var dim int
+			if _, err := fmt.Sscan(dimStr, &dim); err != nil {
+				return 0, fmt.Errorf("parse dense_vector dim: %w", err)
+			}
+			return dim, nil
+		}
+	}
+	return 0, fmt.Errorf("dense_vector field not found")
 }
 
 func (s *Store) Stats(ctx context.Context, name string) (int64, error) {

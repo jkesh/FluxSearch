@@ -353,6 +353,26 @@ func (s *Service) indexVectors(
 		return false, fmt.Errorf("get collection: %w", err)
 	}
 
+	if s.embedder != nil {
+		s.milvus.SetVectorDim(s.embedder.Dimension())
+	}
+	if err := s.milvus.EnsureCollection(ctx, coll.MilvusCollection); err != nil {
+		return false, fmt.Errorf("ensure milvus collection: %w", err)
+	}
+	if s.embedder != nil {
+		wantDim := s.embedder.Dimension()
+		gotDim, err := s.milvus.CollectionVectorDim(ctx, coll.MilvusCollection)
+		if err != nil {
+			return false, fmt.Errorf("describe milvus collection: %w", err)
+		}
+		if gotDim != wantDim {
+			return false, fmt.Errorf(
+				"milvus collection %q dim=%d does not match embedding dim=%d; stop API, then run: FLUXSEARCH_MILVUS_COLLECTION=%s go run ./cmd/ensure-milvus -recreate",
+				coll.MilvusCollection, gotDim, wantDim, coll.MilvusCollection,
+			)
+		}
+	}
+
 	if replace {
 		if err := s.milvus.DeleteByDocument(ctx, coll.MilvusCollection, doc.ID.String()); err != nil {
 			return false, fmt.Errorf("delete old vectors: %w", err)
@@ -364,27 +384,56 @@ func (s *Service) indexVectors(
 		texts[i] = ch.Content
 	}
 
-	vectors, err := s.embedder.Embed(ctx, texts)
-	if err != nil {
-		return false, fmt.Errorf("embed chunks: %w", err)
-	}
-
 	modelVersion := fmt.Sprintf("%s:%s", s.embedder.Provider(), s.embedder.Model())
 	records := make([]milvusstore.VectorRecord, len(chunks))
-	for i, ch := range chunks {
-		var page int64
-		if ch.Page != nil {
-			page = int64(*ch.Page)
+	idx := s.milvus.IndexConfig()
+
+	if idx.HybridEnabled {
+		hybrid, ok := embedding.AsHybrid(s.embedder)
+		if !ok {
+			return false, fmt.Errorf("hybrid search enabled but embedder does not support sparse vectors")
 		}
-		records[i] = milvusstore.VectorRecord{
-			ChunkID:               ch.ID.String(),
-			DocumentID:            doc.ID.String(),
-			DocumentVersion:       int64(doc.Version),
-			Content:               ch.Content,
-			Vector:                vectors[i],
-			Page:                  page,
-			Section:               ch.Section,
-			EmbeddingModelVersion: modelVersion,
+		vectors, err := hybrid.EmbedHybrid(ctx, texts)
+		if err != nil {
+			return false, fmt.Errorf("embed chunks: %w", err)
+		}
+		for i, ch := range chunks {
+			var page int64
+			if ch.Page != nil {
+				page = int64(*ch.Page)
+			}
+			records[i] = milvusstore.VectorRecord{
+				ChunkID:               ch.ID.String(),
+				DocumentID:            doc.ID.String(),
+				DocumentVersion:       int64(doc.Version),
+				Content:               ch.Content,
+				Vector:                vectors[i].Dense,
+				Sparse:                vectors[i].Sparse,
+				Page:                  page,
+				Section:               ch.Section,
+				EmbeddingModelVersion: modelVersion,
+			}
+		}
+	} else {
+		vectors, err := s.embedder.Embed(ctx, texts)
+		if err != nil {
+			return false, fmt.Errorf("embed chunks: %w", err)
+		}
+		for i, ch := range chunks {
+			var page int64
+			if ch.Page != nil {
+				page = int64(*ch.Page)
+			}
+			records[i] = milvusstore.VectorRecord{
+				ChunkID:               ch.ID.String(),
+				DocumentID:            doc.ID.String(),
+				DocumentVersion:       int64(doc.Version),
+				Content:               ch.Content,
+				Vector:                vectors[i],
+				Page:                  page,
+				Section:               ch.Section,
+				EmbeddingModelVersion: modelVersion,
+			}
 		}
 	}
 

@@ -3,12 +3,12 @@ package importqueue
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/fluxsearch/fluxsearch/internal/events"
 	"github.com/fluxsearch/fluxsearch/internal/ingestion"
 	miniostore "github.com/fluxsearch/fluxsearch/internal/storage/minio"
 	"github.com/google/uuid"
@@ -46,8 +46,13 @@ type Manager struct {
 	rdb          *redis.Client
 	minio        *miniostore.Store
 	broadcast    Broadcaster
+	eventBus     events.Bus
 	maxJobs      int
 	workerCancel context.CancelFunc
+}
+
+func (m *Manager) SetEventBus(b events.Bus) {
+	m.eventBus = b
 }
 
 func NewManager(rdb *redis.Client, minio *miniostore.Store) *Manager {
@@ -62,7 +67,7 @@ func (m *Manager) SetBroadcaster(b Broadcaster) {
 	m.broadcast = b
 }
 
-func (m *Manager) StartWorker(ctx context.Context, runner Runner) {
+func (m *Manager) StartWorker(ctx context.Context, runner Runner, reindex ReindexRunner) {
 	if m.rdb == nil {
 		log.Printf("import worker: redis unavailable, worker not started")
 		return
@@ -75,8 +80,8 @@ func (m *Manager) StartWorker(ctx context.Context, runner Runner) {
 	m.workerCancel = cancel
 	m.mu.Unlock()
 
-	go m.workerLoop(workerCtx, runner)
-	log.Printf("import worker started (redis queue)")
+	go m.workerLoopMulti(workerCtx, runner, reindex)
+	log.Printf("import worker started (redis queue + reindex)")
 }
 
 func (m *Manager) Enqueue(ctx context.Context, collectionID uuid.UUID, files []FileInput) (*Job, error) {
@@ -180,36 +185,6 @@ func (m *Manager) List(limit int) []Job {
 	return out
 }
 
-func (m *Manager) workerLoop(ctx context.Context, runner Runner) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		res, err := m.rdb.BRPop(ctx, 5*time.Second, redisKeyQueue).Result()
-		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				continue
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			log.Printf("import worker brpop: %v", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if len(res) < 2 {
-			continue
-		}
-		jobID, err := uuid.Parse(res[1])
-		if err != nil {
-			continue
-		}
-		m.processJob(ctx, runner, jobID)
-	}
-}
-
 func (m *Manager) processJob(ctx context.Context, runner Runner, jobID uuid.UUID) {
 	payload, err := m.loadJob(ctx, jobID)
 	if err != nil {
@@ -272,6 +247,14 @@ func (m *Manager) processJob(ctx context.Context, runner Runner, jobID uuid.UUID
 			it.VectorsStored = result.VectorsStored
 		})
 		m.bumpProgress(ctx, jobID, true)
+		if m.eventBus != nil && docID != uuid.Nil {
+			switch result.Outcome {
+			case ingestion.OutcomeUpdated:
+				_ = m.eventBus.Publish(ctx, events.DocumentUpdated(docID.String(), payload.Job.CollectionID.String(), result.Document.Title))
+			default:
+				_ = m.eventBus.Publish(ctx, events.DocumentCreated(docID.String(), payload.Job.CollectionID.String(), result.Document.Title))
+			}
+		}
 	}
 
 	m.finalizeJob(ctx, jobID)

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/fluxsearch/fluxsearch/internal/bootstrap"
+	"github.com/fluxsearch/fluxsearch/internal/importqueue"
 	"github.com/fluxsearch/fluxsearch/internal/ingestion"
 	"github.com/fluxsearch/fluxsearch/internal/storage/postgres"
 	"github.com/gin-gonic/gin"
@@ -215,6 +216,23 @@ func (h *Handler) RechunkDocument(c *gin.Context) {
 		return
 	}
 
+	if c.Query("async") == "true" {
+		if h.stores.ImportQueue == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "import queue unavailable"})
+			return
+		}
+		if err := h.stores.ImportQueue.EnqueueRechunk(c.Request.Context(), id); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":     "rechunk queued",
+			"document_id": id,
+			"async":       true,
+		})
+		return
+	}
+
 	result, err := h.stores.Ingestion.Rechunk(c.Request.Context(), id)
 	if err != nil {
 		if postgres.IsNotFound(err) {
@@ -234,6 +252,53 @@ func (h *Handler) RechunkDocument(c *gin.Context) {
 		"vectors_stored":  result.VectorsStored,
 		"message":         rechunkMessage(result.VectorsStored),
 		"chunks":          result.Chunks,
+	})
+}
+
+func (h *Handler) ReimportDocument(c *gin.Context) {
+	if h.stores.ImportQueue == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "import queue unavailable"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	defer f.Close()
+
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.stores.ImportQueue.EnqueueReimport(c.Request.Context(), id, importqueue.FileInput{
+		Filename:   file.Filename,
+		SourceType: c.PostForm("source_type"),
+		Raw:        raw,
+	}); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message":     "reimport queued",
+		"document_id": id,
+		"async":       true,
 	})
 }
 

@@ -41,3 +41,32 @@ func (s *Store) GetCollectionByName(ctx context.Context, name string) (document.
 	}
 	return c, nil
 }
+
+func (s *Store) ListCollections(ctx context.Context) ([]document.Collection, error) {
+	const q = `
+		SELECT id, name, description, embedding_model, milvus_collection, created_at, updated_at
+		FROM collections
+		ORDER BY name ASC`
+
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	defer rows.Close()
+
+	var out []document.Collection
+	for rows.Next() {
+		var c document.Collection
+		if err := rows.Scan(
+			&c.ID, &c.Name, &c.Description, &c.EmbeddingModel, &c.MilvusCollection,
+			&c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan collection: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

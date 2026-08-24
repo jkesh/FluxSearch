@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  collectionLabel,
+  DEFAULT_COLLECTION_ID,
   deleteDocument,
   getDocument,
+  listCollections,
   listDocuments,
   rechunkDocument,
+  reimportDocument,
   type Chunk,
+  type Collection,
   type Document,
   type DocumentListItem,
 } from '../lib/api'
+import { useWebSocket } from '../hooks/useWebSocket'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
@@ -41,10 +47,22 @@ function formatTime(iso: string) {
   }
 }
 
+const COLLECTION_STORAGE_KEY = 'fluxsearch:documents:collection_id'
+
+function loadStoredCollectionId(): string {
+  try {
+    return localStorage.getItem(COLLECTION_STORAGE_KEY) || DEFAULT_COLLECTION_ID
+  } catch {
+    return DEFAULT_COLLECTION_ID
+  }
+}
+
 export default function DocumentsPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [collectionId, setCollectionId] = useState(loadStoredCollectionId)
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
   const [listLoading, setListLoading] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
@@ -54,21 +72,39 @@ export default function DocumentsPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<'source' | 'chunks'>('source')
   const [rechunking, setRechunking] = useState(false)
+  const [reimporting, setReimporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const detailIdRef = useRef<string | undefined>(id)
+  detailIdRef.current = id
 
   const loadDocuments = useCallback(async () => {
     setListLoading(true)
     setListError(null)
     try {
-      const data = await listDocuments(100)
+      const data = await listDocuments(200, 0, collectionId)
       setDocuments(data.documents ?? [])
     } catch (err) {
       setListError(String(err))
     } finally {
       setListLoading(false)
     }
-  }, [])
+  }, [collectionId])
+
+  const loadCollections = useCallback(async () => {
+    try {
+      const data = await listCollections()
+      const items = data.collections ?? []
+      setCollections(items)
+      if (items.length > 0 && !items.some((c) => c.id === collectionId)) {
+        const fallback = items.find((c) => c.id === DEFAULT_COLLECTION_ID) ?? items[0]
+        setCollectionId(fallback.id)
+      }
+    } catch {
+      // keep current selection; list still works with collection_id param
+    }
+  }, [collectionId])
 
   const loadDetail = useCallback(async (docId: string) => {
     setDetailLoading(true)
@@ -86,9 +122,51 @@ export default function DocumentsPage() {
     }
   }, [])
 
+  useWebSocket({
+    url: '/api/v1/ws/events',
+    onMessage: (ev) => {
+      const docId = detailIdRef.current
+      if (!docId || ev.document_id !== docId) return
+      if (ev.type === 'document.reindex' && ev.status === 'processing') {
+        setActionMsg('正在后台重新索引…')
+      }
+      if (ev.type === 'document.updated' || (ev.type === 'document.reindex' && ev.status === 'failed')) {
+        if (ev.type === 'document.updated') {
+          setActionMsg('重新索引完成')
+          void loadDocuments()
+          void loadDetail(docId)
+        } else if (ev.message || ev.error) {
+          setActionMsg(ev.message ?? ev.error ?? '重新索引失败')
+        }
+        setRechunking(false)
+        setReimporting(false)
+      }
+    },
+  })
+
+  useEffect(() => {
+    void loadCollections()
+  }, [loadCollections])
+
   useEffect(() => {
     void loadDocuments()
   }, [loadDocuments])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLECTION_STORAGE_KEY, collectionId)
+    } catch {
+      // ignore
+    }
+  }, [collectionId])
+
+  const onCollectionChange = (nextId: string) => {
+    if (nextId === collectionId) return
+    setCollectionId(nextId)
+    if (id) navigate('/documents')
+  }
+
+  const activeCollection = collections.find((c) => c.id === collectionId)
 
   useEffect(() => {
     if (!id) {
@@ -121,16 +199,29 @@ export default function DocumentsPage() {
     setRechunking(true)
     setActionMsg(null)
     try {
-      const res = await rechunkDocument(id)
-      setActionMsg(`重新分块完成：v${res.version} · ${res.chunk_count} 块`)
-      await loadDocuments()
-      await loadDetail(id)
-      setDetailTab('chunks')
+      await rechunkDocument(id, true)
+      setActionMsg('重新分块已加入队列，请稍候…')
     } catch (err) {
       setActionMsg(String(err))
-    } finally {
       setRechunking(false)
     }
+  }
+
+  const onReimportFile = async (file: File) => {
+    if (!id) return
+    setReimporting(true)
+    setActionMsg(null)
+    try {
+      await reimportDocument(id, file)
+      setActionMsg('重新导入已加入队列，请稍候…')
+    } catch (err) {
+      setActionMsg(String(err))
+      setReimporting(false)
+    }
+  }
+
+  const onPickReimport = () => {
+    fileInputRef.current?.click()
   }
 
   const renderSourceContent = () => {
@@ -163,9 +254,28 @@ export default function DocumentsPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h1 className="text-lg font-semibold">文档库</h1>
-            <p className="text-xs text-base-content/50">浏览原文 · 分块预览 · 重新分块</p>
+            <p className="text-xs text-base-content/50">浏览原文 · 分块预览 · 异步重新导入/分块</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-base-content/50">知识库</span>
+              <select
+                className="select select-sm select-bordered min-w-[12rem]"
+                value={collectionId}
+                onChange={(e) => onCollectionChange(e.target.value)}
+                disabled={listLoading && collections.length === 0}
+              >
+                {collections.length === 0 ? (
+                  <option value={collectionId}>加载中…</option>
+                ) : (
+                  collections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {collectionLabel(c)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => void loadDocuments()} disabled={listLoading}>刷新</button>
             <Link to="/import" className="btn btn-sm btn-primary">去导入</Link>
           </div>
@@ -175,7 +285,8 @@ export default function DocumentsPage() {
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside className="flex w-full shrink-0 flex-col border-b border-base-300 bg-base-100 md:w-80 md:border-b-0 md:border-r">
           <div className="border-b border-base-300 px-4 py-2.5 text-xs font-medium text-base-content/50">
-            全部文档 {documents.length > 0 && <span className="tabular-nums">({documents.length})</span>}
+            {activeCollection ? collectionLabel(activeCollection) : '文档列表'}
+            {documents.length > 0 && <span className="tabular-nums"> ({documents.length})</span>}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {listError && <p className="px-4 py-4 text-sm text-error">{listError}</p>}
@@ -237,6 +348,21 @@ export default function DocumentsPage() {
                     </p>
                   </div>
                   <div className="flex gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.md,.markdown,.txt,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        e.target.value = ''
+                        if (file) void onReimportFile(file)
+                      }}
+                    />
+                    <button type="button" className="btn btn-sm btn-outline" onClick={onPickReimport} disabled={reimporting}>
+                      {reimporting ? <span className="loading loading-spinner loading-xs" /> : null}
+                      重新导入
+                    </button>
                     <button type="button" className="btn btn-sm btn-outline" onClick={() => void onRechunk()} disabled={rechunking || !document.content}>
                       {rechunking ? <span className="loading loading-spinner loading-xs" /> : null}
                       重新分块
@@ -248,7 +374,7 @@ export default function DocumentsPage() {
                   </div>
                 </div>
                 {actionMsg && (
-                  <p className={`mt-2 text-xs ${actionMsg.includes('完成') || actionMsg.includes('已删除') ? 'text-success' : 'text-error'}`}>{actionMsg}</p>
+                  <p className={`mt-2 text-xs ${actionMsg.includes('完成') || actionMsg.includes('已删除') || actionMsg.includes('队列') ? 'text-success' : 'text-error'}`}>{actionMsg}</p>
                 )}
                 <div role="tablist" className="tabs tabs-boxed tabs-sm mt-3 w-fit">
                   <button type="button" role="tab" className={`tab ${detailTab === 'source' ? 'tab-active' : ''}`} onClick={() => setDetailTab('source')}>原文</button>

@@ -42,6 +42,9 @@ type Config struct {
 
 	ChunkMaxChars int
 	ChunkOverlap  int
+
+	// When false, API does not run import/reindex worker (use cmd/worker).
+	ImportWorkerInAPI bool
 }
 
 const (
@@ -110,7 +113,14 @@ func Load() Config {
 
 		ChunkMaxChars: envInt("FLUXSEARCH_CHUNK_MAX_CHARS", DefaultChunkMaxChars),
 		ChunkOverlap:  envInt("FLUXSEARCH_CHUNK_OVERLAP", DefaultChunkOverlap),
+
+		ImportWorkerInAPI: envOr("FLUXSEARCH_IMPORT_WORKER_IN_API", "true") != "false",
 	}
+}
+
+// ImportWorkerInAPI returns whether the API process should consume the import queue.
+func ImportWorkerInAPI() bool {
+	return envOr("FLUXSEARCH_IMPORT_WORKER_IN_API", "true") != "false"
 }
 
 func EmbeddingDim() int {

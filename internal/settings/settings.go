@@ -37,6 +37,11 @@ type AppSettings struct {
 
 	SearchTopK           int     `json:"search_top_k"`
 	SearchScoreThreshold float64 `json:"search_score_threshold"`
+	SearchHybridEnabled  bool    `json:"search_hybrid_enabled"`
+	SearchRecallK        int     `json:"search_recall_k"`
+	SearchRerankEnabled  bool    `json:"search_rerank_enabled"`
+	RerankAPIURL         string  `json:"rerank_api_url"`
+	RerankModel          string  `json:"rerank_model"`
 
 	MilvusIndexType          string `json:"milvus_index_type"`
 	MilvusMetric             string `json:"milvus_metric"`
@@ -45,6 +50,8 @@ type AppSettings struct {
 	MilvusHNSWM              int    `json:"milvus_hnsw_m"`
 	MilvusHNSWEfConstruction int    `json:"milvus_hnsw_ef_construction"`
 	MilvusHNSWEf             int    `json:"milvus_hnsw_ef"`
+	MilvusSparseDropRatioBuild  float64 `json:"milvus_sparse_drop_ratio_build"`
+	MilvusSparseDropRatioSearch float64 `json:"milvus_sparse_drop_ratio_search"`
 
 	DocumentDedupEnabled       bool   `json:"document_dedup_enabled"`
 	DocumentDedupMode          string `json:"document_dedup_mode"`
@@ -135,6 +142,10 @@ func (m *Manager) defaultsFromEnv() AppSettings {
 
 		SearchTopK:           envInt("FLUXSEARCH_SEARCH_TOP_K", 5),
 		SearchScoreThreshold: envFloat("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", 0),
+		SearchHybridEnabled:  envBool("FLUXSEARCH_SEARCH_HYBRID_ENABLED", false),
+		SearchRecallK:        envInt("FLUXSEARCH_SEARCH_RECALL_K", DefaultSearchRecallK),
+		SearchRerankEnabled:  envBool("FLUXSEARCH_SEARCH_RERANK_ENABLED", false),
+		RerankModel:          envOr("FLUXSEARCH_RERANK_MODEL", "bge-reranker-v2-m3"),
 
 		MilvusIndexType:          envOr("FLUXSEARCH_MILVUS_INDEX_TYPE", "ivf_flat"),
 		MilvusMetric:             envOr("FLUXSEARCH_MILVUS_METRIC", "IP"),
@@ -143,6 +154,8 @@ func (m *Manager) defaultsFromEnv() AppSettings {
 		MilvusHNSWM:              envInt("FLUXSEARCH_MILVUS_HNSW_M", 16),
 		MilvusHNSWEfConstruction: envInt("FLUXSEARCH_MILVUS_HNSW_EF_CONSTRUCTION", 200),
 		MilvusHNSWEf:             envInt("FLUXSEARCH_MILVUS_HNSW_EF", 64),
+		MilvusSparseDropRatioBuild:  envFloat("FLUXSEARCH_MILVUS_SPARSE_DROP_RATIO_BUILD", DefaultMilvusSparseDropRatioBuild),
+		MilvusSparseDropRatioSearch: envFloat("FLUXSEARCH_MILVUS_SPARSE_DROP_RATIO_SEARCH", 0),
 
 		DocumentDedupEnabled:       d.DocumentDedupEnabled,
 		DocumentDedupMode:          d.DocumentDedupMode,
@@ -225,6 +238,17 @@ func (m *Manager) mergeFile(file *AppSettings) {
 	if file.SearchScoreThreshold >= 0 {
 		m.data.SearchScoreThreshold = file.SearchScoreThreshold
 	}
+	m.data.SearchHybridEnabled = file.SearchHybridEnabled
+	if file.SearchRecallK > 0 {
+		m.data.SearchRecallK = file.SearchRecallK
+	}
+	m.data.SearchRerankEnabled = file.SearchRerankEnabled
+	if file.RerankAPIURL != "" {
+		m.data.RerankAPIURL = file.RerankAPIURL
+	}
+	if file.RerankModel != "" {
+		m.data.RerankModel = file.RerankModel
+	}
 
 	if file.MilvusIndexType != "" {
 		m.data.MilvusIndexType = file.MilvusIndexType
@@ -246,6 +270,12 @@ func (m *Manager) mergeFile(file *AppSettings) {
 	}
 	if file.MilvusHNSWEf > 0 {
 		m.data.MilvusHNSWEf = file.MilvusHNSWEf
+	}
+	if file.MilvusSparseDropRatioBuild >= 0 {
+		m.data.MilvusSparseDropRatioBuild = file.MilvusSparseDropRatioBuild
+	}
+	if file.MilvusSparseDropRatioSearch >= 0 {
+		m.data.MilvusSparseDropRatioSearch = file.MilvusSparseDropRatioSearch
 	}
 
 	if file.ChunkDedupScope != "" {
@@ -315,6 +345,11 @@ type UpdateInput struct {
 
 	SearchTopK           *int     `json:"search_top_k"`
 	SearchScoreThreshold *float64 `json:"search_score_threshold"`
+	SearchHybridEnabled  *bool    `json:"search_hybrid_enabled"`
+	SearchRecallK        *int     `json:"search_recall_k"`
+	SearchRerankEnabled  *bool    `json:"search_rerank_enabled"`
+	RerankAPIURL         *string  `json:"rerank_api_url"`
+	RerankModel          *string  `json:"rerank_model"`
 
 	MilvusIndexType          *string `json:"milvus_index_type"`
 	MilvusMetric             *string `json:"milvus_metric"`
@@ -323,6 +358,8 @@ type UpdateInput struct {
 	MilvusHNSWM              *int    `json:"milvus_hnsw_m"`
 	MilvusHNSWEfConstruction *int    `json:"milvus_hnsw_ef_construction"`
 	MilvusHNSWEf             *int    `json:"milvus_hnsw_ef"`
+	MilvusSparseDropRatioBuild  *float64 `json:"milvus_sparse_drop_ratio_build"`
+	MilvusSparseDropRatioSearch *float64 `json:"milvus_sparse_drop_ratio_search"`
 
 	DocumentDedupEnabled       *bool   `json:"document_dedup_enabled"`
 	DocumentDedupMode          *string `json:"document_dedup_mode"`
@@ -379,6 +416,17 @@ func (m *Manager) Update(in UpdateInput) error {
 	if in.SearchScoreThreshold != nil && *in.SearchScoreThreshold >= 0 {
 		m.data.SearchScoreThreshold = *in.SearchScoreThreshold
 	}
+	if in.SearchHybridEnabled != nil {
+		m.data.SearchHybridEnabled = *in.SearchHybridEnabled
+	}
+	if in.SearchRecallK != nil && *in.SearchRecallK > 0 {
+		m.data.SearchRecallK = *in.SearchRecallK
+	}
+	if in.SearchRerankEnabled != nil {
+		m.data.SearchRerankEnabled = *in.SearchRerankEnabled
+	}
+	applyStrPtr(&m.data.RerankAPIURL, in.RerankAPIURL)
+	applyStrPtr(&m.data.RerankModel, in.RerankModel)
 
 	applyStrPtr(&m.data.MilvusIndexType, in.MilvusIndexType)
 	applyStrPtr(&m.data.MilvusMetric, in.MilvusMetric)
@@ -396,6 +444,12 @@ func (m *Manager) Update(in UpdateInput) error {
 	}
 	if in.MilvusHNSWEf != nil && *in.MilvusHNSWEf > 0 {
 		m.data.MilvusHNSWEf = *in.MilvusHNSWEf
+	}
+	if in.MilvusSparseDropRatioBuild != nil && *in.MilvusSparseDropRatioBuild >= 0 {
+		m.data.MilvusSparseDropRatioBuild = *in.MilvusSparseDropRatioBuild
+	}
+	if in.MilvusSparseDropRatioSearch != nil && *in.MilvusSparseDropRatioSearch >= 0 {
+		m.data.MilvusSparseDropRatioSearch = *in.MilvusSparseDropRatioSearch
 	}
 
 	if in.DocumentDedupEnabled != nil {
@@ -459,6 +513,11 @@ func (m *Manager) applyToEnv(s AppSettings) {
 	setEnv("FLUXSEARCH_CHUNK_OVERLAP", strconv.Itoa(s.ChunkOverlap))
 	setEnv("FLUXSEARCH_SEARCH_TOP_K", strconv.Itoa(s.SearchTopK))
 	setEnv("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", strconv.FormatFloat(s.SearchScoreThreshold, 'f', -1, 64))
+	setEnv("FLUXSEARCH_SEARCH_HYBRID_ENABLED", strconv.FormatBool(s.SearchHybridEnabled))
+	setEnv("FLUXSEARCH_SEARCH_RECALL_K", strconv.Itoa(s.SearchRecallK))
+	setEnv("FLUXSEARCH_SEARCH_RERANK_ENABLED", strconv.FormatBool(s.SearchRerankEnabled))
+	setEnv("FLUXSEARCH_RERANK_API_URL", s.RerankAPIURL)
+	setEnv("FLUXSEARCH_RERANK_MODEL", s.RerankModel)
 
 	setEnv("FLUXSEARCH_MILVUS_INDEX_TYPE", s.MilvusIndexType)
 	setEnv("FLUXSEARCH_MILVUS_METRIC", s.MilvusMetric)
@@ -467,6 +526,8 @@ func (m *Manager) applyToEnv(s AppSettings) {
 	setEnv("FLUXSEARCH_MILVUS_HNSW_M", strconv.Itoa(s.MilvusHNSWM))
 	setEnv("FLUXSEARCH_MILVUS_HNSW_EF_CONSTRUCTION", strconv.Itoa(s.MilvusHNSWEfConstruction))
 	setEnv("FLUXSEARCH_MILVUS_HNSW_EF", strconv.Itoa(s.MilvusHNSWEf))
+	setEnv("FLUXSEARCH_MILVUS_SPARSE_DROP_RATIO_BUILD", strconv.FormatFloat(s.MilvusSparseDropRatioBuild, 'f', -1, 64))
+	setEnv("FLUXSEARCH_MILVUS_SPARSE_DROP_RATIO_SEARCH", strconv.FormatFloat(s.MilvusSparseDropRatioSearch, 'f', -1, 64))
 }
 
 func (m *Manager) ToConfig() config.Config {
@@ -517,6 +578,18 @@ func envFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseBool(v)
 	if err != nil {
 		return fallback
 	}

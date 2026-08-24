@@ -7,51 +7,45 @@ import (
 
 	"github.com/fluxsearch/fluxsearch/internal/conversation"
 	"github.com/fluxsearch/fluxsearch/internal/document"
-	"github.com/fluxsearch/fluxsearch/internal/embedding"
 	"github.com/fluxsearch/fluxsearch/internal/llm"
+	"github.com/fluxsearch/fluxsearch/internal/retrieval"
 	"github.com/fluxsearch/fluxsearch/internal/settings"
 	pgstore "github.com/fluxsearch/fluxsearch/internal/storage/postgres"
-	milvusstore "github.com/fluxsearch/fluxsearch/internal/storage/milvus"
 	"github.com/google/uuid"
 )
-
-const defaultMilvusCollection = "fluxsearch_default"
 
 // Source is a retrieved chunk used as RAG context (alias for conversation.Source).
 type Source = conversation.Source
 
 type Service struct {
-	pg       *pgstore.Store
-	milvus   *milvusstore.Store
-	embedder embedding.Embedder
-	llm      llm.Client
-	settings *settings.Manager
+	pg        *pgstore.Store
+	retrieval *retrieval.Service
+	llm       llm.Client
+	settings  *settings.Manager
 }
 
 func NewService(
 	pg *pgstore.Store,
-	milvus *milvusstore.Store,
-	embedder embedding.Embedder,
+	retrievalSvc *retrieval.Service,
 	llmClient llm.Client,
 	settings *settings.Manager,
 ) *Service {
 	return &Service{
-		pg:       pg,
-		milvus:   milvus,
-		embedder: embedder,
-		llm:      llmClient,
-		settings: settings,
+		pg:        pg,
+		retrieval: retrievalSvc,
+		llm:       llmClient,
+		settings:  settings,
 	}
 }
 
-func (s *Service) Configure(embedder embedding.Embedder, llmClient llm.Client) {
-	s.embedder = embedder
+func (s *Service) Configure(retrievalSvc *retrieval.Service, llmClient llm.Client) {
+	s.retrieval = retrievalSvc
 	s.llm = llmClient
 }
 
 func (s *Service) retrieve(ctx context.Context, query string) ([]Source, error) {
-	if s.embedder == nil || s.milvus == nil {
-		return nil, fmt.Errorf("embedding or milvus unavailable")
+	if s.retrieval == nil {
+		return nil, fmt.Errorf("retrieval unavailable")
 	}
 
 	cfg := s.settings.Get()
@@ -61,44 +55,9 @@ func (s *Service) retrieve(ctx context.Context, query string) ([]Source, error) 
 	}
 
 	collectionID, _ := uuid.Parse(document.DefaultCollectionID)
-	collectionName := defaultMilvusCollection
-	if s.pg != nil {
-		if coll, err := s.pg.GetCollectionByID(ctx, collectionID); err == nil {
-			collectionName = coll.MilvusCollection
-		}
-	}
-
-	vectors, err := s.embedder.Embed(ctx, []string{query})
+	hits, _, err := s.retrieval.Search(ctx, collectionID, query, topK)
 	if err != nil {
-		return nil, fmt.Errorf("embed query: %w", err)
-	}
-	if len(vectors) == 0 {
-		return nil, nil
-	}
-
-	hits, err := s.milvus.Search(ctx, collectionName, vectors[0], topK)
-	if err != nil {
-		return nil, fmt.Errorf("milvus search: %w", err)
-	}
-
-	docIDs := make([]uuid.UUID, 0, len(hits))
-	seen := make(map[uuid.UUID]struct{}, len(hits))
-	for _, hit := range hits {
-		if _, ok := seen[hit.DocumentID]; ok {
-			continue
-		}
-		seen[hit.DocumentID] = struct{}{}
-		docIDs = append(docIDs, hit.DocumentID)
-	}
-
-	titles := map[uuid.UUID]string{}
-	if s.pg != nil && len(docIDs) > 0 {
-		docs, err := s.pg.GetDocumentsByIDs(ctx, docIDs)
-		if err == nil {
-			for id, doc := range docs {
-				titles[id] = doc.Title
-			}
-		}
+		return nil, err
 	}
 
 	threshold := float32(cfg.SearchScoreThreshold)
@@ -110,7 +69,7 @@ func (s *Service) retrieve(ctx context.Context, query string) ([]Source, error) 
 		out = append(out, Source{
 			ChunkID:    hit.ChunkID,
 			DocumentID: hit.DocumentID,
-			Title:      titles[hit.DocumentID],
+			Title:      hit.DocumentTitle,
 			Content:    hit.Content,
 			Score:      hit.Score,
 			Page:       hit.Page,
