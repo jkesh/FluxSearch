@@ -11,9 +11,10 @@ FluxSearch 技术文档按主题拆分，便于查阅与维护。
 | [api.md](api.md) | 前后端 | REST / WebSocket 接口规范 |
 | [development.md](development.md) | 开发者 | 本地环境、目录结构、构建命令 |
 | [infrastructure.md](infrastructure.md) | 运维 | K8s 集群、中间件、配置与密钥 |
-| [retrieval.md](retrieval.md) | 算法 / 后端 | 检索流水线、索引、训练、评测 |
+| [retrieval.md](retrieval.md) | 算法 / 后端 | 检索流水线、索引、评测 |
 | [roadmap.md](roadmap.md) | 产品 / 研发 | 版本规划、里程碑、进度 |
 | [design-principles.md](design-principles.md) | 全员 | 架构与设计约束 |
+| [../eval/README.md](../eval/README.md) | 算法 / 后端 | BEIR 检索评测流水线 |
 
 ## 阅读建议
 
@@ -31,4 +32,5 @@ FluxSearch 技术文档按主题拆分，便于查阅与维护。
 **检索算法开发**
 
 1. [retrieval.md](retrieval.md)
-2. [design-principles.md](design-principles.md)
+2. [../eval/README.md](../eval/README.md)
+3. [design-principles.md](design-principles.md)

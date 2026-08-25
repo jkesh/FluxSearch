@@ -7,6 +7,7 @@
 | Go | 1.25+ |
 | Node.js | 20+ |
 | npm | 10+ |
+| Python | 3.10+（检索评测 `eval/` 需要） |
 | Make | 可选 |
 | kubectl | 连接 K8s 集群时需要 |
 
@@ -21,45 +22,56 @@ go env -w GOPROXY=https://goproxy.cn,direct
 ```text
 FluxSearch/
 ├── cmd/                        # 可执行入口
-│   ├── api/                    # Gin API + WebSocket
-│   ├── worker/                 # 摄取 Worker
-│   ├── scheduler/              # 定时任务
-│   ├── trainer/                # 训练数据 / 模型注册
-│   └── eval/                   # 离线评测 CLI
+│   ├── api/                    # Gin API + WebSocket ✅
+│   ├── worker/                 # 导入 + 重索引 Worker ✅
+│   ├── monitor/                # 基础设施监控 ✅
+│   ├── ensure-milvus/          # Milvus collection 管理 ✅
+│   ├── scheduler/              # 定时任务（占位）
+│   ├── trainer/                # 训练数据（占位）
+│   └── eval/                   # Go 评测 CLI（占位，见 eval/ Python）
 │
 ├── internal/                   # 私有业务逻辑
 │   ├── api/
 │   │   ├── handler/            # REST Handlers
 │   │   └── ws/                 # WebSocket Hub
-│   ├── document/               # 文档 CRUD
-│   ├── parser/                 # 文档解析
-│   ├── chunker/                # 文本分块
-│   ├── embedding/              # 向量生成
+│   ├── bootstrap/              # 依赖注入、Stores 初始化
+│   ├── chat/                   # RAG 对话
+│   ├── chunker/                # 递归分块
+│   ├── config/                 # 环境变量
+│   ├── conversation/           # 对话类型
+│   ├── document/               # 文档模型
+│   ├── embedding/              # Dense / Hybrid Embedding
+│   ├── events/                 # Redis Pub/Sub 事件
+│   ├── importqueue/            # Redis 导入 + 重索引队列
 │   ├── ingestion/              # 摄取编排
-│   ├── search/                 # 查询处理
-│   ├── retrieval/              # Dense / Sparse / RRF
-│   ├── rerank/                 # Cross-Encoder
-│   ├── generation/             # RAG + LLM Client
-│   ├── training/               # 训练数据
-│   ├── evaluation/             # 评测指标
-│   └── storage/                # 基础设施适配
+│   ├── llm/                    # LLM 客户端
+│   ├── monitor/                # 监控采集
+│   ├── parser/                 # PDF / MD / DOCX / TXT
+│   ├── reindex/                # 全量 Reindex 协调
+│   ├── rerank/                 # HTTP Cross-Encoder
+│   ├── retrieval/              # 检索编排
+│   ├── settings/               # 应用设置
+│   └── storage/                # PG / Redis / MinIO / Milvus
+│
+├── eval/                       # Python 检索评测流水线 ✅
+│   ├── scifact/                # BEIR SciFact
+│   ├── cqadupstack_unix/       # CQADupStack Unix
+│   ├── reports/                # JSON 评测报告
+│   └── requirements.txt
 │
 ├── frontend/                   # React 前端
 │   ├── src/
-│   │   ├── components/
-│   │   ├── pages/              # ChatPage / SearchPage
+│   │   ├── components/         # ChatComposer / HistorySidebar 等
+│   │   ├── pages/              # Chat / Search / Import / Documents / Settings
 │   │   ├── hooks/              # useWebSocket
 │   │   └── lib/                # API Client
-│   ├── vite.config.ts
-│   └── package.json
+│   └── vite.config.ts
 │
 ├── config/                     # 环境配置
-│   ├── infra.example.env
-│   └── local/                  # 本地私有配置（gitignore）
-│
 ├── deploy/scripts/             # 远程部署脚本
 ├── docs/                       # 技术文档
-├── migrations/                 # SQL 迁移
+├── migrations/                 # SQL 迁移（001 ~ 007）
+├── scripts/                    # 辅助脚本（如 FlagEmbedding 服务）
 ├── go.mod
 ├── Makefile
 └── README.md
@@ -70,8 +82,10 @@ FluxSearch/
 ### 1. 配置
 
 ```bash
+mkdir -p config/local
 cp config/infra.example.env config/local/infra.env
-# 编辑填入实际连接信息
+cp config/app.settings.example.json config/local/app.settings.json
+# 编辑填入实际连接信息与 API Key
 ```
 
 ### 2. 连接集群中间件（可选）
@@ -90,38 +104,48 @@ kubectl port-forward -n fluxsearch svc/minio   9000:9000 &
 ### 3. 启动服务
 
 ```bash
-# 终端 1：后端
+# 终端 1：API
 make run-api          # 监听 :8080
 
-# 终端 2：前端
+# 终端 2（可选，生产推荐独立 Worker）
+make run-worker
+
+# 终端 3：前端
 make run-frontend     # 监听 :5173
 ```
+
+开发默认 API 内嵌 Worker（`FLUXSEARCH_IMPORT_WORKER_IN_API=true`）。生产可将 Worker 独立部署并关闭 API 内嵌消费。
 
 ### 4. 验证
 
 - 前端：http://localhost:5173
 - 健康检查：http://localhost:8080/healthz
 - WebSocket 对话页测试流式回复
+- 导入页观察 `/ws/events` 进度推送
 
 ## 构建
 
 ```bash
-# 后端二进制
+make build              # fluxsearch-api + fluxsearch-worker
 make build-api
 make build-worker
-
-# 前端生产包
-make build-frontend   # 输出 frontend/dist/
+make build-frontend     # 输出 frontend/dist/
 ```
 
 ## 常用命令
 
 ```bash
-make run-api          # 启动 API
-make run-frontend     # 启动前端 dev server
-make test             # Go 单元测试
-make tidy             # go mod tidy
+make run-api
+make run-worker
+make run-frontend
+make test
+make tidy
+
+# 检索评测（SciFact 冒烟）
+make scifact-download scifact-setup scifact-setup-milvus scifact-import-smoke scifact-run-smoke
 ```
+
+详见 [eval/README.md](../eval/README.md)。
 
 ## 前端开发说明
 
@@ -146,9 +170,10 @@ make tidy             # go mod tidy
 
 ### 新增 WebSocket 事件
 
-1. 在 `internal/api/ws/hub.go` 扩展消息处理
-2. 定义 JSON 消息结构
-3. 更新 [api.md](api.md)
+1. 在 `internal/events/types.go` 定义事件类型
+2. 业务完成后 `events.Bus.Publish`
+3. `bootstrap.WireEventBridge` 自动转发至 `/ws/events`
+4. 更新 [api.md](api.md)
 
 ### 代码规范
 

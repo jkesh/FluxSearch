@@ -91,6 +91,7 @@ POST /api/v1/search
   "query": "检索关键词",
   "top_k": 10,
   "collection": "fluxsearch_default",
+  "mode": "hybrid+rerank",
   "count": 3,
   "results": [
     {
@@ -106,9 +107,43 @@ POST /api/v1/search
 }
 ```
 
+`mode` 取值：`dense` / `hybrid` / `dense+rerank` / `hybrid+rerank`，取决于设置页 Hybrid / Rerank 开关。
+
 ---
 
-### 文档
+### 文档更新（异步）
+
+#### 重新分块
+
+```
+POST /api/v1/documents/:id/rechunk?async=true
+```
+
+异步模式返回 `202 Accepted`：
+
+```json
+{ "message": "rechunk queued", "document_id": "uuid", "async": true }
+```
+
+省略 `async=true` 时同步执行并返回分块结果。
+
+#### 重新导入
+
+```
+POST /api/v1/documents/:id/reimport
+```
+
+`multipart/form-data`，字段 `file`（必填）、`source_type`（可选）。
+
+```json
+{ "message": "reimport queued", "document_id": "uuid", "async": true }
+```
+
+进度与完成状态通过 `WS /api/v1/ws/events` 推送 `document.reindex` / `document.updated` 事件。
+
+---
+
+### 文档 CRUD
 
 #### 列表
 

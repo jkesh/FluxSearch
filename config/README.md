@@ -51,4 +51,12 @@ kubectl port-forward -n fluxsearch svc/minio   9000:9000 &
 
 使用 `infra.env` 中 `*_LOCAL` / `local_dev` 段地址连接。
 
+### 常用环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `FLUXSEARCH_IMPORT_WORKER_IN_API` | `true` | API 是否消费导入/重索引队列；生产建议 `false` 并单独运行 Worker |
+| `FLUXSEARCH_MILVUS_COLLECTION` | `fluxsearch_default` | 覆盖 Milvus collection（评测时使用 eval collection） |
+| `FLUXSEARCH_EMBEDDING_*` | — | Embedding 提供商与模型（可被 `app.settings.json` 覆盖） |
+
 详细基础设施说明见 [docs/infrastructure.md](../docs/infrastructure.md)。

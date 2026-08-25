@@ -24,7 +24,7 @@ API、Worker、Scheduler、Trainer、Eval 共享 `internal/` 业务逻辑，按�
 
 ### 推理本地化
 
-Embedding 与 Rerank 优先通过 ONNX 在 Go 进程内推理，避免维护额外 Python 推理服务。仅在 ONNX 不可用时回退到 Remote API。
+Embedding 与 Rerank 当前以 **OpenAI-compatible HTTP API** 为主（百炼、Ollama、FlagEmbedding 服务）。ONNX 进程内推理为后续优化方向，避免维护额外 Python 推理服务。
 
 ## 数据原则
 
@@ -53,7 +53,7 @@ Embedding 与 Rerank 优先通过 ONNX 在 Go 进程内推理，避免维护额�
 
 ### 评测驱动迭代
 
-所有检索策略变更（分块策略、融合参数、模型切换）必须通过 `cmd/eval` 离线评测验证，用数据而非直觉决策。
+所有检索策略变更（分块策略、Hybrid / Rerank 参数、模型切换）应通过 `eval/` Python 离线评测验证，用数据而非直觉决策。Go 版 `cmd/eval` 为后续规划。
 
 ## 工程原则
 

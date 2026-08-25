@@ -6,7 +6,10 @@
 ✅ K8s 基础设施（PostgreSQL / Redis / MinIO / Milvus / etcd）
 ✅ V0 Minimal RAG（导入 / 检索 / 对话 / 对话历史）
 ✅ V1 实时摄取（Redis 事件总线、独立 Worker、异步重索引）
-⏳ V2 ~ V7
+🚧 V2 Hybrid Retrieval（Milvus Hybrid 已实现，RRF / Metadata Filter 待完善）
+🚧 V3 Reranking（HTTP Cross-Encoder 已实现，ONNX 本地推理待完善）
+🚧 V4 Evaluation（Python eval 流水线已实现，Go CLI / RAG 评测待完善）
+⏳ V5 ~ V7
 ```
 
 ## V0 — Minimal RAG ✅
@@ -36,36 +39,42 @@
 - [x] MinIO 原始文件存储
 - [x] Redis 导入队列 + 可选 API 内 Worker（`FLUXSEARCH_IMPORT_WORKER_IN_API`）
 - [x] `cmd/worker` 独立进程（导入 + 重索引双队列）
-- [x] Redis Pub/Sub 领域事件（`fluxsearch:events`，Kafka 兼容 schema，可后续迁移）
-- [x] WebSocket 事件推送（`/ws/events`：导入进度、文档创建/更新/删除、重索引状态）
+- [x] Redis Pub/Sub 领域事件（`fluxsearch:events`，Kafka 兼容 schema）
+- [x] WebSocket 事件推送（`/ws/events`）
 - [x] 异步重新导入 `POST /documents/:id/reimport`
 - [x] 异步重新分块 `POST /documents/:id/rechunk?async=true`
 - [ ] Kafka 事件发布与消费（当前以 Redis Pub/Sub 代替）
 
-## V2 — Hybrid Retrieval
+## V2 — Hybrid Retrieval 🚧
 
 目标：Dense + Sparse 混合检索，提升 Recall。
 
 - [x] Dense Retrieval（Milvus）
-- [ ] BM25 / Sparse（Bleve 或 Milvus Sparse）
-- [ ] `internal/retrieval/fusion`：RRF
+- [x] Milvus Hybrid Search（FlagEmbedding BGE-M3 Sparse + Dense）
+- [x] `internal/retrieval` 检索编排
+- [ ] 独立 Sparse 引擎（Bleve）
+- [ ] `internal/retrieval/fusion`：RRF 多路融合
 - [ ] Metadata Filter
 
-## V3 — Reranking
+## V3 — Reranking 🚧
 
 目标：精排提升 Precision，带引用回答。
 
-- [ ] ONNX Cross-Encoder Reranker
-- [ ] 多阶段检索 Top100 → Top5
-- [ ] Context Builder + Citation 增强
+- [x] HTTP Cross-Encoder Reranker（OpenAI-compatible / FlagEmbedding）
+- [x] 多阶段检索 recallK → topK
+- [x] RAG 引用来源展示
+- [ ] ONNX 本地 Cross-Encoder
+- [ ] Context Builder 增强（Token Budget、去重策略）
 
-## V4 — Evaluation
+## V4 — Evaluation 🚧
 
 目标：可量化的检索与 RAG 评测。
 
-- [ ] `cmd/eval`：Recall@K / MRR / nDCG
-- [ ] 延迟基准测试
+- [x] `eval/` Python 流水线（SciFact / CQADupStack Unix）
+- [x] Hit@K / Recall@K / MRR@K / 延迟报告（JSON）
+- [ ] `cmd/eval` Go CLI
 - [ ] RAG 评测（LLM-as-Judge）
+- [ ] CI 集成自动化基准
 
 ## V5 — Model Pipeline
 
@@ -100,6 +109,6 @@
 |------|------|---------------------|
 | V0 | ✅ 基本完成 | 2~3 周 |
 | V1 | ✅ 基本完成 | 2~3 周 |
-| V2~V3 | ⏳ | 3~4 周 |
-| V4 | ⏳ | 2~3 周 |
+| V2~V3 | 🚧 部分完成 | 3~4 周 |
+| V4 | 🚧 部分完成 | 2~3 周 |
 | V5~V7 | ⏳ | 按需推进 |

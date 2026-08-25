@@ -19,31 +19,33 @@
 | 语言 | Go 1.25+ | 后端唯一语言 |
 | HTTP 框架 | [Gin](https://github.com/gin-gonic/gin) | 路由、中间件、JSON 绑定 |
 | WebSocket | [gorilla/websocket](https://github.com/gorilla/websocket) | 流式 RAG、事件推送 |
-| SQL | [sqlc](https://sqlc.dev) + [pgx](https://github.com/jackc/pgx) | 类型安全 SQL（规划中） |
-| 配置 | `config/local` + 环境变量 | 本地与集群配置分离 |
+| SQL | [pgx](https://github.com/jackc/pgx) | PostgreSQL 驱动（手写 SQL） |
+| 配置 | `config/local` + 环境变量 + `app.settings.json` | 本地与集群配置分离 |
 
 ## 数据与中间件
 
 | 类别 | 技术 | 用途 |
 |------|------|------|
-| 业务数据库 | PostgreSQL 16 | 用户、文档、会话、模型版本 |
-| 向量数据库 | Milvus 2.4 (standalone) | Dense / Sparse 向量检索 |
+| 业务数据库 | PostgreSQL 16 | 文档、会话、评测元数据 |
+| 向量数据库 | Milvus 2.4 (standalone) | Dense / Hybrid 向量检索 |
 | 元数据 | etcd 3.5 | Milvus 元数据存储 |
-| 缓存 | Redis 7 | 缓存、限流、分布式锁 |
-| 对象存储 | MinIO | 原始文件、ONNX 模型 |
-| 消息队列 | Kafka | 文档事件、异步索引（V1+） |
+| 缓存 / 队列 / 事件 | Redis 7 | 导入队列、重索引队列、Pub/Sub 事件 |
+| 对象存储 | MinIO | 原始文件、导入 staging |
+| 消息队列 | Kafka（规划） | V1 以 Redis Pub/Sub 代替 |
 
 ## 检索与 AI
 
 | 类别 | 技术 | 说明 |
 |------|------|------|
 | 文档解析 | `ledongthuc/pdf`、`nguyenthenguyen/docx`、`goldmark` | PDF / Word / Markdown |
-| 分块 | `internal/chunker` | 固定窗口 / 语义分块 |
-| Embedding | ONNX Runtime Go / OpenAI-compatible API | 向量生成 |
-| 稀疏检索 | Bleve / Milvus Sparse Vector | BM25 关键词匹配 |
-| 融合 | `internal/retrieval/fusion` | RRF 多路召回合并 |
-| 精排 | ONNX Cross-Encoder | Top100 → Top5 |
+| 分块 | `internal/chunker` | 递归字符分块（可配置 max/overlap） |
+| Embedding | OpenAI-compatible API / Ollama | 百炼、本地 Ollama 等 |
+| Hybrid Embedding | FlagEmbedding BGE-M3（HTTP） | Dense + Sparse 联合向量 |
+| 稀疏检索 | Milvus Sparse Vector | 与 Dense 在 Milvus 内 Hybrid Search |
+| 融合 | Milvus HybridSearch | 非独立 RRF 包，由 Milvus 融合 |
+| 精排 | HTTP Cross-Encoder（OpenAI-compatible） | FlagEmbedding rerank API |
 | LLM | OpenAI-compatible HTTP Client | RAG 答案生成 |
+| 评测 | Python + BEIR 数据集 | `eval/scifact`、`eval/cqadupstack_unix` |
 
 ## 运维
 
@@ -52,16 +54,19 @@
 | 容器编排 | K3s / Kubernetes | 当前运行于 K3s 单节点 |
 | 入口 | Traefik | 集群已有 Ingress |
 | 监控 | Prometheus + Grafana | 集群已有监控栈 |
+| 应用监控 | `cmd/monitor` | 依赖健康与基础指标 |
 | GitOps | ArgoCD | 集群已有（规划中） |
-| 指标 | prometheus/client_golang | 应用指标暴露 |
 
 ## 技术决策摘要
 
 | 决策 | 选择 | 原因 |
 |------|------|------|
 | 前后端分离 | React + Go API | UI 迭代与后端解耦，WebSocket 流式体验好 |
-| 后端语言 | 纯 Go | 统一技术栈，Worker / API / 评测共享代码 |
-| 实时通信 | WebSocket | RAG Token 流式、索引进度推送 |
-| Embedding 推理 | ONNX 优先 | 避免额外 Python 推理服务 |
+| 后端语言 | 纯 Go | 统一技术栈，Worker / API 共享代码 |
+| 实时通信 | WebSocket | RAG Token 流式、导入/索引事件推送 |
+| V1 事件总线 | Redis Pub/Sub | 轻量、与现有 Redis 复用，schema 兼容 Kafka |
+| Embedding | Remote API 优先 | 百炼 / Ollama / FlagEmbedding 快速接入 |
+| Hybrid 检索 | Milvus HybridSearch | 避免维护独立 Sparse 引擎 |
+| Rerank | HTTP Cross-Encoder | 与 Embedding 共用 FlagEmbedding 服务 |
 | 向量库 | Milvus standalone | 支持 Hybrid Search，运维成本可控 |
-| SQL 生成 | sqlc | 编译期类型检查，优于 ORM 魔法 |
+| 离线评测 | Python BEIR 流水线 | 数据集生态成熟，报告输出 JSON |

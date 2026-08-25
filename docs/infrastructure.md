@@ -47,9 +47,11 @@
 config/
 ├── infra.example.env       # 模板
 ├── infra.example.yaml      # 模板
+├── app.settings.example.json
 └── local/
     ├── infra.env           # 实际配置
-    └── infra.yaml          # 实际配置
+    ├── infra.yaml
+    └── app.settings.json   # Embedding / LLM / 检索设置
 ```
 
 K8s Secret `fluxsearch-infra`（命名空间 `fluxsearch`）包含应用运行时所需的环境变量。
@@ -57,9 +59,11 @@ K8s Secret `fluxsearch-infra`（命名空间 `fluxsearch`）包含应用运行�
 ### 首次配置
 
 ```bash
+mkdir -p config/local
 cp config/infra.example.env config/local/infra.env
 cp config/infra.example.yaml config/local/infra.yaml
-# 填入实际密码
+cp config/app.settings.example.json config/local/app.settings.json
+# 填入实际密码与 API Key
 ```
 
 ## 本地访问（port-forward）
@@ -83,39 +87,48 @@ kubectl port-forward -n fluxsearch svc/minio   9000:9000 &
 ### PostgreSQL — 业务数据
 
 ```text
-users / organizations / documents / collections
-permissions / conversations / messages
-training_jobs / model_versions / index_versions
+collections / documents / chunks
+conversations / messages
+eval 数据集元数据（SciFact / CQADupStack）
 ```
+
+迁移文件见 `migrations/`（001 ~ 007）。
 
 ### Milvus — 检索索引
 
 ```text
 chunk_id / document_id / document_version
-content / dense_vector / sparse_vector
+content / dense_vector / sparse_vector（Hybrid 模式）
 metadata / embedding_model_version
 ```
+
+业务 collection 默认 `fluxsearch_default`；评测使用独立 collection（如 `fluxsearch_eval_scifact`）。
 
 ### MinIO — 对象存储
 
 ```text
-原始文档（PDF / Word / Markdown / HTML）
-训练数据集 / ONNX 模型文件
+原始文档（PDF / Word / Markdown）
+导入 staging 对象（异步队列临时存储）
 ```
 
-### Redis — 缓存与协调
+Bucket：`fluxsearch-documents`（可配置）。
+
+### Redis — 缓存、队列与事件
 
 ```text
-查询缓存 / 限流 / Session
-分布式锁 / 短生命周期任务状态
+fluxsearch:import:queue      # 异步导入任务
+fluxsearch:reindex:queue     # 重导入 / 重分块
+fluxsearch:events            # Pub/Sub 领域事件频道
+导入任务状态（job hash + TTL）
 ```
 
-### Kafka — 事件流（V1+）
+### Kafka — 事件流（规划中）
+
+V1 以 **Redis Pub/Sub** 实现领域事件（schema 兼容 Kafka，便于后续迁移）：
 
 ```text
 document.created / document.updated / document.deleted
-embedding.requested / index.updated
-query.logged / feedback.created
+document.reindex / import_progress
 ```
 
 ## 应用部署（规划）
@@ -125,6 +138,13 @@ fluxsearch-api       Deployment  (1~3 replicas)
 fluxsearch-worker    Deployment  (按队列深度扩展)
 frontend             Deployment  (nginx 托管 dist/)
 ```
+
+环境变量建议：
+
+| 变量 | 说明 |
+|------|------|
+| `FLUXSEARCH_IMPORT_WORKER_IN_API` | API 是否内嵌 Worker（生产建议 `false`） |
+| `FLUXSEARCH_MILVUS_COLLECTION` | 覆盖默认 Milvus collection（评测用） |
 
 入口通过集群已有 Traefik Ingress 暴露，TLS 由 cert-manager 管理。
 
