@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/fluxsearch/fluxsearch/internal/document"
 	"github.com/fluxsearch/fluxsearch/internal/embedding"
@@ -81,7 +82,8 @@ func (s *Service) Search(ctx context.Context, collectionID uuid.UUID, query stri
 				return nil, "", fmt.Errorf("embed query: %w", err)
 			}
 			if len(vectors) > 0 {
-				hits, err = s.milvus.HybridSearch(ctx, collectionName, vectors[0].Dense, vectors[0].Sparse, recallK, topK)
+				// Return recallK candidates from hybrid fusion so reranker can reorder a full pool.
+				hits, err = s.milvus.HybridSearch(ctx, collectionName, vectors[0].Dense, vectors[0].Sparse, recallK, recallK)
 				if err != nil {
 					return nil, "", err
 				}
@@ -107,6 +109,9 @@ func (s *Service) Search(ctx context.Context, collectionID uuid.UUID, query stri
 	if len(hits) == 0 {
 		return nil, mode, nil
 	}
+
+	// Collapse chunk-level hits to one candidate per document before rerank / top_k.
+	hits = aggregateHitsByDocument(hits)
 
 	if cfg.SearchRerankEnabled && s.reranker != nil && len(hits) > 1 {
 		candidates := make([]rerank.Candidate, len(hits))
@@ -180,5 +185,27 @@ func (s *Service) enrichHits(ctx context.Context, hits []document.SearchHit) []H
 			Section:       hit.Section,
 		})
 	}
+	return out
+}
+
+// aggregateHitsByDocument keeps the highest-scoring chunk per document.
+func aggregateHitsByDocument(hits []document.SearchHit) []document.SearchHit {
+	if len(hits) == 0 {
+		return hits
+	}
+	best := make(map[uuid.UUID]document.SearchHit, len(hits))
+	for _, hit := range hits {
+		prev, ok := best[hit.DocumentID]
+		if !ok || hit.Score > prev.Score {
+			best[hit.DocumentID] = hit
+		}
+	}
+	out := make([]document.SearchHit, 0, len(best))
+	for _, hit := range best {
+		out = append(out, hit)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Score > out[j].Score
+	})
 	return out
 }

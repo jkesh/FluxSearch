@@ -26,10 +26,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 _model = None
+_sparse_model = None
 _reranker = None
 _model_name = "bge-m3"
 _reranker_name = "bge-reranker-v2-m3"
 _encode_lock = threading.Lock()
+_sparse_encode_lock = threading.Lock()
 _rerank_lock = threading.Lock()
 
 
@@ -57,19 +59,31 @@ def encode_texts(
     max_length: int,
     return_sparse: bool,
 ) -> list[dict[str, Any]]:
-    global _model
+    global _model, _sparse_model
     if _model is None:
         raise RuntimeError("model not loaded")
     with _encode_lock:
-        out = _model.encode(
+        dense_out = _model.encode(
             texts,
             batch_size=batch_size,
             max_length=max_length,
             return_dense=True,
-            return_sparse=return_sparse,
+            return_sparse=False,
         )
-    dense = out["dense_vecs"]
-    sparse_rows = out.get("lexical_weights") if return_sparse else None
+    dense = dense_out["dense_vecs"]
+    sparse_rows = None
+    if return_sparse:
+        sparse_backend = _sparse_model or _model
+        sparse_lock = _sparse_encode_lock if _sparse_model is not None else _encode_lock
+        with sparse_lock:
+            sparse_out = sparse_backend.encode(
+                texts,
+                batch_size=batch_size,
+                max_length=max_length,
+                return_dense=False,
+                return_sparse=True,
+            )
+        sparse_rows = sparse_out.get("lexical_weights")
     rows: list[dict[str, Any]] = []
     for i, vec in enumerate(dense):
         if hasattr(vec, "tolist"):
@@ -214,19 +228,29 @@ def main() -> int:
     parser.add_argument("--model", default="BAAI/bge-m3", help="HF model id or local path")
     parser.add_argument("--rerank-model", default="BAAI/bge-reranker-v2-m3", help="HF reranker id or local path")
     parser.add_argument("--no-reranker", action="store_true", help="Skip loading reranker model")
-    parser.add_argument("--device", default="", help="cuda / cpu (default: auto)")
+    parser.add_argument("--device", default="", help="Dense embedding + reranker device: cuda / cpu (default: auto)")
+    parser.add_argument(
+        "--sparse-device",
+        default="",
+        help="Sparse (lexical) embedding device; if set, loads a second BGE-M3 on this device for sparse only",
+    )
     parser.add_argument("--fp16", action="store_true", help="Use fp16 when CUDA is available")
     parser.add_argument("--max-length", type=int, default=512)
     args = parser.parse_args()
 
-    global _model, _model_name, _reranker, _reranker_name
+    global _model, _sparse_model, _model_name, _reranker, _reranker_name
     _model_name = args.model.split("/")[-1] if "/" in args.model else args.model
     _reranker_name = args.rerank_model.split("/")[-1] if "/" in args.rerank_model else args.rerank_model
     device = args.device or None
-    print(f"Loading {_model_name} ...", flush=True)
+    sparse_device = args.sparse_device or None
+    print(f"Loading {_model_name} (dense) on {device or 'auto'} ...", flush=True)
     _model = load_model(args.model, device, use_fp16=args.fp16)
+    if sparse_device:
+        sparse_fp16 = args.fp16 and sparse_device != "cpu"
+        print(f"Loading {_model_name} (sparse) on {sparse_device} ...", flush=True)
+        _sparse_model = load_model(args.model, sparse_device, use_fp16=sparse_fp16)
     if not args.no_reranker:
-        print(f"Loading reranker {_reranker_name} ...", flush=True)
+        print(f"Loading reranker {_reranker_name} on {device or 'auto'} ...", flush=True)
         _reranker = load_reranker(args.rerank_model, device, use_fp16=args.fp16)
     print(f"Ready on http://{args.host}:{args.port}/v1/embeddings", flush=True)
     if _reranker is not None:

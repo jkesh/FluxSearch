@@ -1,5 +1,5 @@
 .PHONY: build build-api build-worker build-frontend run-api run-worker run-frontend dev test tidy \
-	run-flagembedding eval-download eval-import-smoke eval-run-smoke eval-import eval-run eval-setup-milvus eval-reset eval-reset-import
+	run-flagembedding eval-download eval-import-smoke eval-run-smoke eval-import eval-run eval-setup-milvus eval-reset eval-reset-import scifact-download scifact-setup scifact-setup-milvus scifact-import-smoke scifact-run-smoke scifact-import scifact-run
 
 BIN_DIR := bin
 
@@ -27,7 +27,7 @@ run-api:
 	go run ./cmd/api
 
 run-flagembedding:
-	python scripts/flagembedding_server.py --port 8091
+	python scripts/flagembedding_server.py --port 8091 --device cuda --sparse-device cpu --fp16
 
 run-worker:
 	go run ./cmd/worker
@@ -79,3 +79,27 @@ eval-reset-import: eval-reset
 
 eval-run:
 	python eval/cqadupstack_unix/run_eval.py --top-k 10
+
+# ── BEIR SciFact retrieval eval ───────────────────────────
+SCIFACT_MILVUS_COLLECTION := fluxsearch_eval_scifact
+
+scifact-download:
+	python eval/scifact/download.py
+
+scifact-setup:
+	python eval/scifact/setup_collection.py
+
+scifact-setup-milvus:
+	FLUXSEARCH_MILVUS_COLLECTION=$(SCIFACT_MILVUS_COLLECTION) go run ./cmd/ensure-milvus -recreate
+
+scifact-import-smoke:
+	python eval/scifact/import_corpus.py --limit 200 --workers 2
+
+scifact-run-smoke:
+	python eval/scifact/run_eval.py --query-limit 50 --top-k 10
+
+scifact-import:
+	python eval/scifact/import_corpus.py --resume --workers 2
+
+scifact-run:
+	python eval/scifact/run_eval.py --top-k 10
