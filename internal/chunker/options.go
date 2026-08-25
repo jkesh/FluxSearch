@@ -1,37 +1,37 @@
 package chunker
 
-// DefaultMaxChars 约 512 tokens（中英文混合粗估 chars/4）
-const DefaultMaxChars = 2048
+// DefaultMaxTokens 默认单块最大 token 数（与 BGE-M3 常用 max_length 对齐）
+const DefaultMaxTokens = 512
 
-// DefaultOverlap 约 64 tokens
-const DefaultOverlap = 256
+// DefaultOverlapTokens 默认块间重叠 token 数
+const DefaultOverlapTokens = 64
 
 // DefaultSeparators 递归分割优先级：段落 → 行 → 中英文句号 → 空格 → 硬切
 var DefaultSeparators = []string{"\n\n", "\n", "。", ".", " ", ""}
 
 type Options struct {
-	MaxChars    int
-	Overlap     int
+	MaxTokens   int
+	OverlapTokens int
 	Separators  []string
 }
 
 func DefaultOptions() Options {
 	return Options{
-		MaxChars:   DefaultMaxChars,
-		Overlap:    DefaultOverlap,
-		Separators: append([]string(nil), DefaultSeparators...),
+		MaxTokens:     DefaultMaxTokens,
+		OverlapTokens: DefaultOverlapTokens,
+		Separators:    append([]string(nil), DefaultSeparators...),
 	}
 }
 
 func (o Options) normalized() Options {
-	if o.MaxChars <= 0 {
-		o.MaxChars = DefaultMaxChars
+	if o.MaxTokens <= 0 {
+		o.MaxTokens = DefaultMaxTokens
 	}
-	if o.Overlap < 0 {
-		o.Overlap = 0
+	if o.OverlapTokens < 0 {
+		o.OverlapTokens = 0
 	}
-	if o.Overlap >= o.MaxChars {
-		o.Overlap = o.MaxChars / 5
+	if o.OverlapTokens >= o.MaxTokens {
+		o.OverlapTokens = o.MaxTokens / 5
 	}
 	if len(o.Separators) == 0 {
 		o.Separators = append([]string(nil), DefaultSeparators...)

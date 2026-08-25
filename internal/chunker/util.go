@@ -6,6 +6,9 @@ import (
 	"unicode/utf8"
 )
 
+// charsPerToken 与 estimateTokens 一致：中英文混合粗估 4 字符 ≈ 1 token
+const charsPerToken = 4
+
 func contentHash(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
@@ -16,11 +19,22 @@ func estimateTokens(text string) int {
 	if n == 0 {
 		return 0
 	}
-	tokens := n / 4
+	tokens := n / charsPerToken
 	if tokens < 1 {
 		return 1
 	}
 	return tokens
+}
+
+func tokenLen(s string) int {
+	return estimateTokens(s)
+}
+
+func runesForTokens(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+	return tokens * charsPerToken
 }
 
 func runeLen(s string) int {
@@ -53,4 +67,25 @@ func runeTail(s string, n int) string {
 		return ""
 	}
 	return string(runes[len(runes)-n:])
+}
+
+func tokenTail(s string, overlapTokens int) string {
+	return runeTail(s, runesForTokens(overlapTokens))
+}
+
+func hardSplitByTokens(text string, maxTokens int) []string {
+	maxRunes := runesForTokens(maxTokens)
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return []string{text}
+	}
+	var parts []string
+	for start := 0; start < len(runes); start += maxRunes {
+		end := start + maxRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		parts = append(parts, string(runes[start:end]))
+	}
+	return parts
 }

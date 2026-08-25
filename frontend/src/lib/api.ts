@@ -180,8 +180,8 @@ export interface AppSettings {
   llm_model: string
   llm_temperature: number
   llm_max_tokens: number
-  chunk_max_chars: number
-  chunk_overlap: number
+  chunk_max_tokens: number
+  chunk_overlap_tokens: number
   search_top_k: number
   search_score_threshold: number
   search_hybrid_enabled: boolean

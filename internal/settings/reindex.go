@@ -16,7 +16,7 @@ func DetectReindexPlan(before, after AppSettings) ReindexPlan {
 	var plan ReindexPlan
 	var reasons []string
 
-	if before.ChunkMaxChars != after.ChunkMaxChars || before.ChunkOverlap != after.ChunkOverlap {
+	if before.ChunkMaxTokens != after.ChunkMaxTokens || before.ChunkOverlapTokens != after.ChunkOverlapTokens {
 		plan.RechunkAll = true
 		reasons = append(reasons, "分块参数变更")
 	}
@@ -27,6 +27,11 @@ func DetectReindexPlan(before, after AppSettings) ReindexPlan {
 		if before.EmbeddingDim != after.EmbeddingDim {
 			plan.RecreateCollection = true
 		}
+	}
+
+	if before.EmbeddingMaxLength != after.EmbeddingMaxLength {
+		plan.ReembedAll = true
+		reasons = append(reasons, "Embedding max_length 变更")
 	}
 
 	if milvusStructureChanged(before, after) {

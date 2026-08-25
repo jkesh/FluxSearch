@@ -18,7 +18,8 @@ type OpenAICompatibleConfig struct {
 	APIKey         string
 	Model          string
 	Dimension      int
-	BatchSize      int
+	BatchSize       int
+	MaxLength       int
 	HybridSupported bool
 }
 
@@ -29,6 +30,7 @@ type openAICompatible struct {
 	model           string
 	dimension       int
 	batchSize       int
+	maxLength       int
 	hybridSupported bool
 	client          *http.Client
 }
@@ -51,6 +53,7 @@ func NewOpenAICompatible(cfg OpenAICompatibleConfig) (Embedder, error) {
 		model:           cfg.Model,
 		dimension:       cfg.Dimension,
 		batchSize:       batch,
+		maxLength:       cfg.MaxLength,
 		hybridSupported: cfg.HybridSupported,
 		client:          &http.Client{Timeout: 120 * time.Second},
 	}, nil
@@ -89,6 +92,9 @@ func (e *openAICompatible) embedBatch(ctx context.Context, texts []string) ([][]
 	if e.dimension > 0 {
 		body["dimensions"] = e.dimension
 	}
+	if e.maxLength > 0 {
+		body["max_length"] = e.maxLength
+	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -104,8 +110,8 @@ func (e *openAICompatible) embedBatch(ctx context.Context, texts []string) ([][]
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
 	}
 
-	log.Printf("embedding request: provider=%s model=%s texts=%d url=%s/embeddings",
-		e.provider, e.model, len(texts), e.baseURL)
+	log.Printf("embedding request: provider=%s model=%s texts=%d max_length=%d url=%s/embeddings",
+		e.provider, e.model, len(texts), e.maxLength, e.baseURL)
 
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -186,6 +192,9 @@ func (e *openAICompatible) embedHybridBatch(ctx context.Context, texts []string)
 	}
 	if e.dimension > 0 {
 		body["dimensions"] = e.dimension
+	}
+	if e.maxLength > 0 {
+		body["max_length"] = e.maxLength
 	}
 
 	payload, err := json.Marshal(body)

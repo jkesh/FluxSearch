@@ -38,10 +38,11 @@ type Config struct {
 	EmbeddingAPIKey       string
 	EmbeddingModel        string
 	EmbeddingBatchSize    int
+	EmbeddingMaxLength    int
 	EmbeddingLocalBackend string
 
-	ChunkMaxChars int
-	ChunkOverlap  int
+	ChunkMaxTokens    int
+	ChunkOverlapTokens int
 
 	// When false, API does not run import/reindex worker (use cmd/worker).
 	ImportWorkerInAPI bool
@@ -49,9 +50,10 @@ type Config struct {
 
 const (
 	DefaultEmbeddingDim   = 1024
-	DefaultChunkMaxChars  = 2048
-	DefaultChunkOverlap   = 256
-	DefaultEmbeddingBatch = 16
+	DefaultChunkMaxTokens     = 512
+	DefaultChunkOverlapTokens = 64
+	DefaultEmbeddingBatch       = 16
+	DefaultEmbeddingMaxLength = 512
 )
 
 func Load() Config {
@@ -109,10 +111,11 @@ func Load() Config {
 		EmbeddingAPIKey:       envOr("FLUXSEARCH_EMBEDDING_API_KEY", ""),
 		EmbeddingModel:        envOr("FLUXSEARCH_EMBEDDING_MODEL", ""),
 		EmbeddingBatchSize:    envInt("FLUXSEARCH_EMBEDDING_BATCH_SIZE", DefaultEmbeddingBatch),
+		EmbeddingMaxLength:    envInt("FLUXSEARCH_EMBEDDING_MAX_LENGTH", DefaultEmbeddingMaxLength),
 		EmbeddingLocalBackend: envOr("FLUXSEARCH_EMBEDDING_LOCAL_BACKEND", "ollama"),
 
-		ChunkMaxChars: envInt("FLUXSEARCH_CHUNK_MAX_CHARS", DefaultChunkMaxChars),
-		ChunkOverlap:  envInt("FLUXSEARCH_CHUNK_OVERLAP", DefaultChunkOverlap),
+		ChunkMaxTokens:     chunkMaxTokensFromEnv(),
+		ChunkOverlapTokens: chunkOverlapTokensFromEnv(),
 
 		ImportWorkerInAPI: envOr("FLUXSEARCH_IMPORT_WORKER_IN_API", "true") != "false",
 	}
@@ -125,6 +128,42 @@ func ImportWorkerInAPI() bool {
 
 func EmbeddingDim() int {
 	return envInt("FLUXSEARCH_EMBEDDING_DIM", DefaultEmbeddingDim)
+}
+
+// CharsToTokens 将旧版字符数配置换算为 token 数（4 字符 ≈ 1 token）
+func CharsToTokens(chars int) int {
+	return charsToTokens(chars)
+}
+
+func charsToTokens(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	tokens := chars / 4
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
+}
+
+func chunkMaxTokensFromEnv() int {
+	if v := os.Getenv("FLUXSEARCH_CHUNK_MAX_TOKENS"); v != "" {
+		return envInt("FLUXSEARCH_CHUNK_MAX_TOKENS", DefaultChunkMaxTokens)
+	}
+	if v := os.Getenv("FLUXSEARCH_CHUNK_MAX_CHARS"); v != "" {
+		return charsToTokens(envInt("FLUXSEARCH_CHUNK_MAX_CHARS", 0))
+	}
+	return DefaultChunkMaxTokens
+}
+
+func chunkOverlapTokensFromEnv() int {
+	if v := os.Getenv("FLUXSEARCH_CHUNK_OVERLAP_TOKENS"); v != "" {
+		return envInt("FLUXSEARCH_CHUNK_OVERLAP_TOKENS", DefaultChunkOverlapTokens)
+	}
+	if v := os.Getenv("FLUXSEARCH_CHUNK_OVERLAP"); v != "" {
+		return charsToTokens(envInt("FLUXSEARCH_CHUNK_OVERLAP", 0))
+	}
+	return DefaultChunkOverlapTokens
 }
 
 func loadEnvFiles() {

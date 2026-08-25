@@ -186,8 +186,8 @@ func (s *Stores) initEmbedder(cfg config.Config) {
 	}
 	s.Embedder = embedder
 	if embedder != nil {
-		log.Printf("embedding ready: provider=%s model=%s dim=%d",
-			embedder.Provider(), embedder.Model(), embedder.Dimension())
+		log.Printf("embedding ready: provider=%s model=%s dim=%d max_length=%d",
+			embedder.Provider(), embedder.Model(), embedder.Dimension(), cfg.EmbeddingMaxLength)
 	} else {
 		log.Printf("embedding disabled (set provider in settings)")
 	}
@@ -279,7 +279,7 @@ func (s *Stores) initImportQueue() {
 }
 
 func (s *Stores) initIngestion(cfg config.Config) {
-	chunkOpts := chunker.Options{MaxChars: cfg.ChunkMaxChars, Overlap: cfg.ChunkOverlap}
+	chunkOpts := chunker.Options{MaxTokens: cfg.ChunkMaxTokens, OverlapTokens: cfg.ChunkOverlapTokens}
 	dedup := ingestion.DedupConfigFromSettings(s.Settings.Get())
 	var objects ingestion.ObjectStore
 	if s.Minio != nil {

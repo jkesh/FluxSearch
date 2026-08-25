@@ -23,6 +23,7 @@ type AppSettings struct {
 	EmbeddingModel        string `json:"embedding_model"`
 	EmbeddingDim          int    `json:"embedding_dim"`
 	EmbeddingBatchSize    int    `json:"embedding_batch_size"`
+	EmbeddingMaxLength    int    `json:"embedding_max_length"`
 
 	LLMProvider     string  `json:"llm_provider"`
 	LLMLocalBackend string  `json:"llm_local_backend"`
@@ -32,8 +33,8 @@ type AppSettings struct {
 	LLMTemperature  float64 `json:"llm_temperature"`
 	LLMMaxTokens    int     `json:"llm_max_tokens"`
 
-	ChunkMaxChars int `json:"chunk_max_chars"`
-	ChunkOverlap  int `json:"chunk_overlap"`
+	ChunkMaxTokens     int `json:"chunk_max_tokens"`
+	ChunkOverlapTokens int `json:"chunk_overlap_tokens"`
 
 	SearchTopK           int     `json:"search_top_k"`
 	SearchScoreThreshold float64 `json:"search_score_threshold"`
@@ -128,6 +129,7 @@ func (m *Manager) defaultsFromEnv() AppSettings {
 		EmbeddingModel:        cfg.EmbeddingModel,
 		EmbeddingDim:          nonZeroInt(cfg.EmbeddingDim, config.DefaultEmbeddingDim),
 		EmbeddingBatchSize:    nonZeroInt(cfg.EmbeddingBatchSize, config.DefaultEmbeddingBatch),
+		EmbeddingMaxLength:    nonZeroInt(cfg.EmbeddingMaxLength, config.DefaultEmbeddingMaxLength),
 
 		LLMProvider:     envOr("FLUXSEARCH_LLM_PROVIDER", ""),
 		LLMLocalBackend: envOr("FLUXSEARCH_LLM_LOCAL_BACKEND", "ollama"),
@@ -137,8 +139,8 @@ func (m *Manager) defaultsFromEnv() AppSettings {
 		LLMTemperature:  envFloat("FLUXSEARCH_LLM_TEMPERATURE", 0.7),
 		LLMMaxTokens:    envInt("FLUXSEARCH_LLM_MAX_TOKENS", 2048),
 
-		ChunkMaxChars: nonZeroInt(cfg.ChunkMaxChars, config.DefaultChunkMaxChars),
-		ChunkOverlap:  cfg.ChunkOverlap,
+		ChunkMaxTokens:     nonZeroInt(cfg.ChunkMaxTokens, config.DefaultChunkMaxTokens),
+		ChunkOverlapTokens: cfg.ChunkOverlapTokens,
 
 		SearchTopK:           envInt("FLUXSEARCH_SEARCH_TOP_K", 5),
 		SearchScoreThreshold: envFloat("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", 0),
@@ -175,6 +177,19 @@ func (m *Manager) loadFromFile() error {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return err
 	}
+	// 兼容旧版 chunk_max_chars / chunk_overlap
+	var legacy struct {
+		ChunkMaxChars  int `json:"chunk_max_chars"`
+		ChunkOverlap   int `json:"chunk_overlap"`
+	}
+	if err := json.Unmarshal(raw, &legacy); err == nil {
+		if file.ChunkMaxTokens <= 0 && legacy.ChunkMaxChars > 0 {
+			file.ChunkMaxTokens = config.CharsToTokens(legacy.ChunkMaxChars)
+		}
+		if file.ChunkOverlapTokens == 0 && legacy.ChunkOverlap > 0 {
+			file.ChunkOverlapTokens = config.CharsToTokens(legacy.ChunkOverlap)
+		}
+	}
 	m.mergeFile(&file)
 	return nil
 }
@@ -203,6 +218,9 @@ func (m *Manager) mergeFile(file *AppSettings) {
 	if file.EmbeddingBatchSize > 0 {
 		m.data.EmbeddingBatchSize = file.EmbeddingBatchSize
 	}
+	if file.EmbeddingMaxLength > 0 {
+		m.data.EmbeddingMaxLength = file.EmbeddingMaxLength
+	}
 
 	if file.LLMProvider != "" {
 		m.data.LLMProvider = file.LLMProvider
@@ -226,11 +244,11 @@ func (m *Manager) mergeFile(file *AppSettings) {
 		m.data.LLMMaxTokens = file.LLMMaxTokens
 	}
 
-	if file.ChunkMaxChars > 0 {
-		m.data.ChunkMaxChars = file.ChunkMaxChars
+	if file.ChunkMaxTokens > 0 {
+		m.data.ChunkMaxTokens = file.ChunkMaxTokens
 	}
-	if file.ChunkOverlap >= 0 {
-		m.data.ChunkOverlap = file.ChunkOverlap
+	if file.ChunkOverlapTokens >= 0 {
+		m.data.ChunkOverlapTokens = file.ChunkOverlapTokens
 	}
 	if file.SearchTopK > 0 {
 		m.data.SearchTopK = file.SearchTopK
@@ -331,6 +349,7 @@ type UpdateInput struct {
 	EmbeddingModel        *string `json:"embedding_model"`
 	EmbeddingDim          *int    `json:"embedding_dim"`
 	EmbeddingBatchSize    *int    `json:"embedding_batch_size"`
+	EmbeddingMaxLength    *int    `json:"embedding_max_length"`
 
 	LLMProvider     *string  `json:"llm_provider"`
 	LLMLocalBackend *string  `json:"llm_local_backend"`
@@ -340,8 +359,8 @@ type UpdateInput struct {
 	LLMTemperature  *float64 `json:"llm_temperature"`
 	LLMMaxTokens    *int     `json:"llm_max_tokens"`
 
-	ChunkMaxChars *int `json:"chunk_max_chars"`
-	ChunkOverlap  *int `json:"chunk_overlap"`
+	ChunkMaxTokens     *int `json:"chunk_max_tokens"`
+	ChunkOverlapTokens *int `json:"chunk_overlap_tokens"`
 
 	SearchTopK           *int     `json:"search_top_k"`
 	SearchScoreThreshold *float64 `json:"search_score_threshold"`
@@ -389,6 +408,9 @@ func (m *Manager) Update(in UpdateInput) error {
 	if in.EmbeddingBatchSize != nil && *in.EmbeddingBatchSize > 0 {
 		m.data.EmbeddingBatchSize = *in.EmbeddingBatchSize
 	}
+	if in.EmbeddingMaxLength != nil && *in.EmbeddingMaxLength > 0 {
+		m.data.EmbeddingMaxLength = *in.EmbeddingMaxLength
+	}
 
 	applyStrPtr(&m.data.LLMProvider, in.LLMProvider)
 	applyStrPtr(&m.data.LLMLocalBackend, in.LLMLocalBackend)
@@ -404,11 +426,11 @@ func (m *Manager) Update(in UpdateInput) error {
 		m.data.LLMMaxTokens = *in.LLMMaxTokens
 	}
 
-	if in.ChunkMaxChars != nil && *in.ChunkMaxChars > 0 {
-		m.data.ChunkMaxChars = *in.ChunkMaxChars
+	if in.ChunkMaxTokens != nil && *in.ChunkMaxTokens > 0 {
+		m.data.ChunkMaxTokens = *in.ChunkMaxTokens
 	}
-	if in.ChunkOverlap != nil && *in.ChunkOverlap >= 0 {
-		m.data.ChunkOverlap = *in.ChunkOverlap
+	if in.ChunkOverlapTokens != nil && *in.ChunkOverlapTokens >= 0 {
+		m.data.ChunkOverlapTokens = *in.ChunkOverlapTokens
 	}
 	if in.SearchTopK != nil && *in.SearchTopK > 0 {
 		m.data.SearchTopK = *in.SearchTopK
@@ -500,6 +522,7 @@ func (m *Manager) applyToEnv(s AppSettings) {
 	setEnv("FLUXSEARCH_EMBEDDING_MODEL", s.EmbeddingModel)
 	setEnv("FLUXSEARCH_EMBEDDING_DIM", strconv.Itoa(s.EmbeddingDim))
 	setEnv("FLUXSEARCH_EMBEDDING_BATCH_SIZE", strconv.Itoa(s.EmbeddingBatchSize))
+	setEnv("FLUXSEARCH_EMBEDDING_MAX_LENGTH", strconv.Itoa(s.EmbeddingMaxLength))
 
 	setEnv("FLUXSEARCH_LLM_PROVIDER", s.LLMProvider)
 	setEnv("FLUXSEARCH_LLM_LOCAL_BACKEND", s.LLMLocalBackend)
@@ -509,8 +532,8 @@ func (m *Manager) applyToEnv(s AppSettings) {
 	setEnv("FLUXSEARCH_LLM_TEMPERATURE", strconv.FormatFloat(s.LLMTemperature, 'f', -1, 64))
 	setEnv("FLUXSEARCH_LLM_MAX_TOKENS", strconv.Itoa(s.LLMMaxTokens))
 
-	setEnv("FLUXSEARCH_CHUNK_MAX_CHARS", strconv.Itoa(s.ChunkMaxChars))
-	setEnv("FLUXSEARCH_CHUNK_OVERLAP", strconv.Itoa(s.ChunkOverlap))
+	setEnv("FLUXSEARCH_CHUNK_MAX_TOKENS", strconv.Itoa(s.ChunkMaxTokens))
+	setEnv("FLUXSEARCH_CHUNK_OVERLAP_TOKENS", strconv.Itoa(s.ChunkOverlapTokens))
 	setEnv("FLUXSEARCH_SEARCH_TOP_K", strconv.Itoa(s.SearchTopK))
 	setEnv("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", strconv.FormatFloat(s.SearchScoreThreshold, 'f', -1, 64))
 	setEnv("FLUXSEARCH_SEARCH_HYBRID_ENABLED", strconv.FormatBool(s.SearchHybridEnabled))
@@ -540,8 +563,9 @@ func (m *Manager) ToConfig() config.Config {
 	cfg.EmbeddingModel = s.EmbeddingModel
 	cfg.EmbeddingDim = s.EmbeddingDim
 	cfg.EmbeddingBatchSize = s.EmbeddingBatchSize
-	cfg.ChunkMaxChars = s.ChunkMaxChars
-	cfg.ChunkOverlap = s.ChunkOverlap
+	cfg.EmbeddingMaxLength = s.EmbeddingMaxLength
+	cfg.ChunkMaxTokens = s.ChunkMaxTokens
+	cfg.ChunkOverlapTokens = s.ChunkOverlapTokens
 	return cfg
 }
 

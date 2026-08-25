@@ -33,6 +33,7 @@ _reranker_name = "bge-reranker-v2-m3"
 _encode_lock = threading.Lock()
 _sparse_encode_lock = threading.Lock()
 _rerank_lock = threading.Lock()
+_default_max_length = 512
 
 
 def load_model(name: str, device: str | None, use_fp16: bool):
@@ -187,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": {"message": "input is required"}})
                 return
             batch_size = int(body.get("batch_size") or 16)
-            max_length = int(body.get("max_length") or 512)
+            raw_max_length = body.get("max_length")
+            max_length = int(raw_max_length) if raw_max_length is not None else _default_max_length
             return_sparse = bool(body.get("return_sparse"))
             rows = encode_texts(texts, batch_size=batch_size, max_length=max_length, return_sparse=return_sparse)
             data = [
@@ -238,9 +240,10 @@ def main() -> int:
     parser.add_argument("--max-length", type=int, default=512)
     args = parser.parse_args()
 
-    global _model, _sparse_model, _model_name, _reranker, _reranker_name
+    global _model, _sparse_model, _model_name, _reranker, _reranker_name, _default_max_length
     _model_name = args.model.split("/")[-1] if "/" in args.model else args.model
     _reranker_name = args.rerank_model.split("/")[-1] if "/" in args.rerank_model else args.rerank_model
+    _default_max_length = args.max_length
     device = args.device or None
     sparse_device = args.sparse_device or None
     print(f"Loading {_model_name} (dense) on {device or 'auto'} ...", flush=True)

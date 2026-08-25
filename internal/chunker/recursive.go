@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// Recursive 递归字符分割 + Overlap
+// Recursive 递归分割 + Overlap（按 token 计数）
 type Recursive struct{}
 
 func NewRecursive() *Recursive {
@@ -18,9 +18,9 @@ func (c *Recursive) Chunk(text string, opts Options) []Result {
 		return nil
 	}
 
-	pieces := c.splitRecursive(text, opts.MaxChars, opts.Separators)
-	merged := mergePieces(pieces, opts.MaxChars)
-	final := applyOverlap(merged, opts.Overlap, opts.MaxChars)
+	pieces := c.splitRecursive(text, opts.MaxTokens, opts.Separators)
+	merged := mergePieces(pieces, opts.MaxTokens)
+	final := applyOverlap(merged, opts.OverlapTokens, opts.MaxTokens)
 
 	results := make([]Result, 0, len(final))
 	for _, content := range final {
@@ -38,24 +38,24 @@ func (c *Recursive) Chunk(text string, opts Options) []Result {
 	return results
 }
 
-func (c *Recursive) splitRecursive(text string, maxChars int, separators []string) []string {
-	if runeLen(text) <= maxChars {
+func (c *Recursive) splitRecursive(text string, maxTokens int, separators []string) []string {
+	if tokenLen(text) <= maxTokens {
 		return []string{text}
 	}
 	if len(separators) == 0 {
-		return hardSplit(text, maxChars)
+		return hardSplitByTokens(text, maxTokens)
 	}
 
 	sep := separators[0]
 	rest := separators[1:]
 
 	if sep == "" {
-		return hardSplit(text, maxChars)
+		return hardSplitByTokens(text, maxTokens)
 	}
 
 	parts := strings.Split(text, sep)
 	if len(parts) == 1 {
-		return c.splitRecursive(text, maxChars, rest)
+		return c.splitRecursive(text, maxTokens, rest)
 	}
 
 	var out []string
@@ -70,8 +70,8 @@ func (c *Recursive) splitRecursive(text string, maxChars int, separators []strin
 			part = " " + part
 		}
 
-		if runeLen(part) > maxChars {
-			out = append(out, c.splitRecursive(part, maxChars, rest)...)
+		if tokenLen(part) > maxTokens {
+			out = append(out, c.splitRecursive(part, maxTokens, rest)...)
 		} else {
 			out = append(out, part)
 		}
@@ -79,7 +79,7 @@ func (c *Recursive) splitRecursive(text string, maxChars int, separators []strin
 	return out
 }
 
-func mergePieces(pieces []string, maxChars int) []string {
+func mergePieces(pieces []string, maxTokens int) []string {
 	var merged []string
 	var current strings.Builder
 
@@ -103,24 +103,24 @@ func mergePieces(pieces []string, maxChars int) []string {
 		}
 
 		candidate := current.String() + piece
-		if runeLen(candidate) <= maxChars {
+		if tokenLen(candidate) <= maxTokens {
 			current.WriteString(piece)
 			continue
 		}
 
 		flush()
-		if runeLen(piece) <= maxChars {
+		if tokenLen(piece) <= maxTokens {
 			current.WriteString(piece)
 		} else {
-			merged = append(merged, hardSplit(piece, maxChars)...)
+			merged = append(merged, hardSplitByTokens(piece, maxTokens)...)
 		}
 	}
 	flush()
 	return merged
 }
 
-func applyOverlap(chunks []string, overlap, maxChars int) []string {
-	if overlap <= 0 || len(chunks) <= 1 {
+func applyOverlap(chunks []string, overlapTokens, maxTokens int) []string {
+	if overlapTokens <= 0 || len(chunks) <= 1 {
 		return chunks
 	}
 
@@ -130,35 +130,19 @@ func applyOverlap(chunks []string, overlap, maxChars int) []string {
 			out = append(out, chunk)
 			continue
 		}
-		prefix := runeTail(out[i-1], overlap)
+		prefix := tokenTail(out[i-1], overlapTokens)
 		combined := prefix + chunk
-		if runeLen(combined) > maxChars {
-			// 截断前缀以保证不超限
-			allowed := maxChars - runeLen(chunk)
-			if allowed > 0 {
-				prefix = runeTail(out[i-1], allowed)
+		if tokenLen(combined) > maxTokens {
+			allowedTokens := maxTokens - tokenLen(chunk)
+			if allowedTokens > 0 {
+				prefix = tokenTail(out[i-1], allowedTokens)
 				combined = prefix + chunk
 			} else {
-				combined = runeSlice(chunk, 0, maxChars)
+				maxRunes := runesForTokens(maxTokens)
+				combined = runeSlice(chunk, 0, maxRunes)
 			}
 		}
 		out = append(out, combined)
 	}
 	return out
-}
-
-func hardSplit(text string, maxChars int) []string {
-	runes := []rune(text)
-	if len(runes) <= maxChars {
-		return []string{text}
-	}
-	var parts []string
-	for start := 0; start < len(runes); start += maxChars {
-		end := start + maxChars
-		if end > len(runes) {
-			end = len(runes)
-		}
-		parts = append(parts, string(runes[start:end]))
-	}
-	return parts
 }

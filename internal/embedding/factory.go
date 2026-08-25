@@ -19,6 +19,7 @@ type Options struct {
 	Model        string
 	Dimension    int
 	BatchSize    int
+	MaxLength    int
 	LocalBackend string // ollama | llamacpp（provider=local 时）
 }
 
@@ -30,6 +31,7 @@ func NewFromConfig(cfg config.Config) (Embedder, error) {
 		Model:        cfg.EmbeddingModel,
 		Dimension:    cfg.EmbeddingDim,
 		BatchSize:    cfg.EmbeddingBatchSize,
+		MaxLength:    cfg.EmbeddingMaxLength,
 		LocalBackend: cfg.EmbeddingLocalBackend,
 	}
 	return New(opts)
@@ -80,6 +82,7 @@ func newBailian(opts Options) (Embedder, error) {
 		Model:     model,
 		Dimension: opts.Dimension,
 		BatchSize: opts.BatchSize,
+		MaxLength: opts.MaxLength,
 	})
 }
 
@@ -116,6 +119,7 @@ func newLlamaCPP(opts Options) (Embedder, error) {
 		Model:           model,
 		Dimension:       opts.Dimension,
 		BatchSize:       opts.BatchSize,
+		MaxLength:       opts.MaxLength,
 		HybridSupported: true,
 	})
 }

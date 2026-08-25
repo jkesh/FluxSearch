@@ -20,22 +20,22 @@ export default function IngestionPanel({ form, patch }: Props) {
   return (
     <div className="space-y-5">
       <Section title="文档分块" desc="影响新导入与重新分块">
-        <Field label="最大字符数">
+        <Field label="最大 token 数">
           <input
             type="number"
             className="input input-bordered input-sm w-full"
-            value={form.chunk_max_chars}
-            min={256}
-            onChange={(e) => patch('chunk_max_chars', Number(e.target.value))}
+            value={form.chunk_max_tokens}
+            min={64}
+            onChange={(e) => patch('chunk_max_tokens', Number(e.target.value))}
           />
         </Field>
-        <Field label="重叠字符数">
+        <Field label="重叠 token 数">
           <input
             type="number"
             className="input input-bordered input-sm w-full"
-            value={form.chunk_overlap}
+            value={form.chunk_overlap_tokens}
             min={0}
-            onChange={(e) => patch('chunk_overlap', Number(e.target.value))}
+            onChange={(e) => patch('chunk_overlap_tokens', Number(e.target.value))}
           />
         </Field>
       </Section>

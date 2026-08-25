@@ -33,7 +33,7 @@ func NewService(
 	embedder embedding.Embedder,
 	opts chunker.Options,
 ) *Service {
-	if opts.MaxChars <= 0 {
+	if opts.MaxTokens <= 0 {
 		opts = chunker.DefaultOptions()
 	}
 	return &Service{
@@ -46,7 +46,7 @@ func NewService(
 }
 
 func (s *Service) Configure(embedder embedding.Embedder, opts chunker.Options, dedup DedupConfig, objects ObjectStore) {
-	if opts.MaxChars <= 0 {
+	if opts.MaxTokens <= 0 {
 		opts = chunker.DefaultOptions()
 	}
 	s.embedder = embedder
