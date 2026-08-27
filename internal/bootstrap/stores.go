@@ -18,6 +18,7 @@ import (
 	"github.com/fluxsearch/fluxsearch/internal/reindex"
 	"github.com/fluxsearch/fluxsearch/internal/rerank"
 	"github.com/fluxsearch/fluxsearch/internal/retrieval"
+	"github.com/fluxsearch/fluxsearch/internal/retrieval/bm25"
 	"github.com/fluxsearch/fluxsearch/internal/settings"
 	miniostore "github.com/fluxsearch/fluxsearch/internal/storage/minio"
 	pgstore "github.com/fluxsearch/fluxsearch/internal/storage/postgres"
@@ -43,6 +44,7 @@ type Stores struct {
 	Reindex     *reindex.Coordinator
 	ImportQueue *importqueue.Manager
 	Events      events.Bus
+	BM25        *bm25.Index
 	Config      config.Config
 }
 
@@ -88,6 +90,7 @@ func InitWorkerStores(ctx context.Context) Stores {
 	stores.initEvents()
 	stores.initImportQueue()
 	stores.initIngestion(cfg)
+	stores.initBM25(ctx)
 
 	return stores
 }
@@ -133,16 +136,57 @@ func (s *Stores) initChat() {
 	s.Chat.Configure(s.Retrieval, s.LLM)
 }
 
+func (s *Stores) initBM25(ctx context.Context) {
+	if s.Postgres == nil {
+		return
+	}
+	if s.BM25 == nil {
+		s.BM25 = bm25.NewIndex()
+	}
+	if err := s.rebuildBM25(ctx, s.BM25); err != nil {
+		log.Printf("bm25 rebuild: %v", err)
+	} else {
+		log.Printf("bm25 index ready: docs=%d", s.BM25.Len())
+	}
+	if s.Ingestion != nil {
+		s.Ingestion.SetBM25(s.BM25)
+	}
+}
+
 func (s *Stores) initRetrieval() {
 	if s.Postgres == nil {
 		s.Retrieval = nil
 		return
 	}
+	s.initBM25(context.Background())
 	if s.Retrieval == nil {
-		s.Retrieval = retrieval.NewService(s.Postgres, s.Milvus, s.Embedder, s.Reranker, s.Settings)
+		s.Retrieval = retrieval.NewService(s.Postgres, s.Milvus, s.Embedder, s.Reranker, s.Settings, s.BM25)
 		return
 	}
 	s.Retrieval.Configure(s.Embedder, s.Reranker)
+}
+
+func (s *Stores) rebuildBM25(ctx context.Context, idx *bm25.Index) error {
+	if s.Postgres == nil || idx == nil {
+		return nil
+	}
+	rows, err := s.Postgres.ListActiveChunksForBM25(ctx)
+	if err != nil {
+		return err
+	}
+	docs := make([]bm25.Document, 0, len(rows))
+	for _, r := range rows {
+		docs = append(docs, bm25.Document{
+			ChunkID:      r.ID,
+			DocumentID:   r.DocumentID,
+			CollectionID: r.CollectionID,
+			Content:      r.Content,
+			Page:         r.Page,
+			Section:      r.Section,
+		})
+	}
+	idx.Rebuild(docs)
+	return nil
 }
 
 func (s *Stores) initReranker() {
@@ -152,9 +196,10 @@ func (s *Stores) initReranker() {
 		return
 	}
 	rr, err := rerank.NewHTTP(rerank.HTTPConfig{
-		BaseURL: s.Settings.RerankAPIURL(),
-		APIKey:  cfg.EmbeddingAPIKey,
-		Model:   cfg.RerankModel,
+		BaseURL:   s.Settings.RerankAPIURL(),
+		APIKey:    cfg.EmbeddingAPIKey,
+		Model:     cfg.RerankModel,
+		BatchSize: s.Settings.RerankBatchSize(),
 	})
 	if err != nil {
 		log.Printf("reranker init failed: %v", err)

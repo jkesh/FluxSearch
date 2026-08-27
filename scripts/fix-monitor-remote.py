@@ -11,7 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-HOST = os.environ.get("FLUXSEARCH_DEPLOY_HOST", "your-k8s-node.example.com")
+HOST = os.environ.get("FLUXSEARCH_DEPLOY_HOST", "113.128.132.69")
 USER = os.environ.get("FLUXSEARCH_DEPLOY_USER", "deploy")
 PASSWORD = os.environ.get("FLUXSEARCH_DEPLOY_PASSWORD", "")
 INFRA_PASSWORD = os.environ.get("FLUXSEARCH_POSTGRES_PASSWORD", "changeme-in-production")

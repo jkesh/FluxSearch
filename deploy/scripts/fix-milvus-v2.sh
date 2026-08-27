@@ -179,3 +179,6 @@ echo ""
 echo "=== Final Status ==="
 kubectl get pods,pvc,svc -n fluxsearch
 echo "=== DONE ==="
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLUXSEARCH_PUBLIC_IP="${FLUXSEARCH_PUBLIC_IP:-113.128.132.69}"
+bash "${SCRIPT_DIR}/apply-external-access.sh"

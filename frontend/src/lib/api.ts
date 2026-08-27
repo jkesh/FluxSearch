@@ -184,7 +184,10 @@ export interface AppSettings {
   chunk_overlap_tokens: number
   search_top_k: number
   search_score_threshold: number
+  search_mode: 'dense' | 'sparse_hybrid' | 'dense_bm25'
   search_hybrid_enabled: boolean
+  search_dense_weight: number
+  search_bm25_weight: number
   search_recall_k: number
   search_rerank_enabled: boolean
   rerank_api_url: string

@@ -12,6 +12,7 @@ import (
 	"github.com/fluxsearch/fluxsearch/internal/document"
 	"github.com/fluxsearch/fluxsearch/internal/embedding"
 	"github.com/fluxsearch/fluxsearch/internal/parser"
+	"github.com/fluxsearch/fluxsearch/internal/retrieval/bm25"
 	pgstore "github.com/fluxsearch/fluxsearch/internal/storage/postgres"
 	milvusstore "github.com/fluxsearch/fluxsearch/internal/storage/milvus"
 	"github.com/google/uuid"
@@ -25,6 +26,7 @@ type Service struct {
 	opts     chunker.Options
 	dedup    DedupConfig
 	objects  ObjectStore
+	bm25     *bm25.Index
 }
 
 func NewService(
@@ -53,6 +55,10 @@ func (s *Service) Configure(embedder embedding.Embedder, opts chunker.Options, d
 	s.opts = opts
 	s.dedup = dedup
 	s.objects = objects
+}
+
+func (s *Service) SetBM25(index *bm25.Index) {
+	s.bm25 = index
 }
 
 func (s *Service) ReembedDocument(ctx context.Context, documentID uuid.UUID) error {
@@ -325,6 +331,8 @@ func (s *Service) chunkDocument(
 		return nil, false, fmt.Errorf("save chunks: %w", err)
 	}
 
+	s.syncBM25(doc, created)
+
 	vectorsStored, err := s.indexVectors(ctx, doc, created, replaceVectors)
 	if err != nil {
 		_ = s.pg.UpdateDocumentStatus(ctx, doc.ID, document.StatusFailed, err.Error())
@@ -519,6 +527,25 @@ func toPageSnapshots(pages []parser.PageContent) []document.PageSnapshot {
 		out[i] = document.PageSnapshot{Page: p.Page, Text: p.Text}
 	}
 	return out
+}
+
+func (s *Service) syncBM25(doc document.Document, chunks []document.Chunk) {
+	if s.bm25 == nil {
+		return
+	}
+	s.bm25.DeleteByDocument(doc.ID)
+	docs := make([]bm25.Document, 0, len(chunks))
+	for _, ch := range chunks {
+		docs = append(docs, bm25.Document{
+			ChunkID:      ch.ID,
+			DocumentID:   doc.ID,
+			CollectionID: doc.CollectionID,
+			Content:      ch.Content,
+			Page:         ch.Page,
+			Section:      ch.Section,
+		})
+	}
+	s.bm25.Upsert(docs)
 }
 
 func hashContent(text string) string {

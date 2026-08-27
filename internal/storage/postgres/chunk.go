@@ -172,6 +172,39 @@ func (s *Store) CountChunks(ctx context.Context) (int64, error) {
 	return n, err
 }
 
+// BM25Chunk is a minimal active chunk row for BM25 index rebuild.
+type BM25Chunk struct {
+	ID           uuid.UUID
+	DocumentID   uuid.UUID
+	CollectionID uuid.UUID
+	Content      string
+	Page         *int
+	Section      string
+}
+
+func (s *Store) ListActiveChunksForBM25(ctx context.Context) ([]BM25Chunk, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.document_id, d.collection_id, c.content, c.page, COALESCE(c.section, '')
+		FROM chunks c
+		JOIN documents d ON d.id = c.document_id
+		WHERE c.status = 'active'
+		ORDER BY c.created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("list active chunks for bm25: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BM25Chunk
+	for rows.Next() {
+		var ch BM25Chunk
+		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.CollectionID, &ch.Content, &ch.Page, &ch.Section); err != nil {
+			return nil, fmt.Errorf("scan bm25 chunk: %w", err)
+		}
+		out = append(out, ch)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) MarkChunksStaleByDocument(ctx context.Context, documentID uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE chunks SET status = 'stale' WHERE document_id = $1 AND status = 'active'`, documentID)

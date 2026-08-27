@@ -158,3 +158,6 @@ kubectl get pods,pvc,svc -n fluxsearch
 helm list -n fluxsearch 2>/dev/null || true
 kubectl get secret fluxsearch-infra -n fluxsearch 2>/dev/null
 echo "=== DONE ==="
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLUXSEARCH_PUBLIC_IP="${FLUXSEARCH_PUBLIC_IP:-113.128.132.69}"
+bash "${SCRIPT_DIR}/apply-external-access.sh"

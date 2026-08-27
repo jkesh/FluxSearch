@@ -8,6 +8,7 @@ FluxSearch 检索由 `internal/retrieval.Service` 编排，按设置页开关组
 |------|------|------|------|
 | 1. Dense Retrieval | 语义召回 | Embedding → Milvus Search | ✅ |
 | 2. Hybrid Retrieval | Dense + Sparse | FlagEmbedding Hybrid → Milvus HybridSearch | ✅（可选） |
+| 2b. Dense + BM25 | 语义 + 关键词 | Dense ANN + 内存 BM25，加权 RRF | ✅（可选） |
 | 3. Document 聚合 | 每文档保留最高分 chunk | `aggregateHitsByDocument` | ✅ |
 | 4. Reranking | 精排 recallK → topK | HTTP Cross-Encoder（`internal/rerank`） | ✅（可选） |
 | 5. Context + LLM | RAG 回答 + 引用 | `internal/chat` | ✅ |
@@ -17,15 +18,18 @@ API 响应字段 `mode`：
 | mode | 含义 |
 |------|------|
 | `dense` | 纯向量检索 |
-| `hybrid` | Milvus Hybrid Search |
-| `dense+rerank` | 向量 + Cross-Encoder |
-| `hybrid+rerank` | Hybrid + Cross-Encoder |
+| `sparse_hybrid` | Milvus Hybrid Search（Dense + 学习型 Sparse） |
+| `dense_bm25` | Dense + BM25 加权 RRF |
+| `bm25` | 仅 BM25（Dense 权重为 0） |
+| `dense+rerank` / `*_+rerank` | 上述任意模式 + Cross-Encoder |
 
 ### 设置项（`app.settings.json` / 设置页）
 
 | 字段 | 说明 |
 |------|------|
-| `search_hybrid_enabled` | 启用 Hybrid 检索 |
+| `search_mode` | `dense` / `sparse_hybrid` / `dense_bm25` |
+| `search_hybrid_enabled` | Sparse Hybrid 时启用 Milvus Sparse schema |
+| `search_dense_weight` / `search_bm25_weight` | `dense_bm25` 模式融合权重 |
 | `search_rerank_enabled` | 启用 Cross-Encoder 精排 |
 | `search_recall_k` | 召回候选数（默认 50） |
 | `search_top_k` | 最终返回数（默认 5） |

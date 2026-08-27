@@ -50,6 +50,10 @@ func (s *Service) DeleteDocument(ctx context.Context, id uuid.UUID) error {
 		}
 	}
 
+	if s.bm25 != nil {
+		s.bm25.DeleteByDocument(id)
+	}
+
 	if err := s.pg.DeleteDocument(ctx, id); err != nil {
 		return err
 	}

@@ -41,8 +41,8 @@
 | 分块 | `internal/chunker` | 递归字符分块（可配置 max/overlap） |
 | Embedding | OpenAI-compatible API / Ollama | 百炼、本地 Ollama 等 |
 | Hybrid Embedding | FlagEmbedding BGE-M3（HTTP） | Dense + Sparse 联合向量 |
-| 稀疏检索 | Milvus Sparse Vector | 与 Dense 在 Milvus 内 Hybrid Search |
-| 融合 | Milvus HybridSearch | 非独立 RRF 包，由 Milvus 融合 |
+| 稀疏检索 | Milvus Sparse / 内存 BM25 | Sparse Hybrid 或 Dense+BM25 |
+| 融合 | Milvus HybridSearch / 加权 RRF | Sparse Hybrid 用前者；Dense+BM25 用后者 |
 | 精排 | HTTP Cross-Encoder（OpenAI-compatible） | FlagEmbedding rerank API |
 | LLM | OpenAI-compatible HTTP Client | RAG 答案生成 |
 | 评测 | Python + BEIR 数据集 | `eval/scifact`、`eval/cqadupstack_unix` |

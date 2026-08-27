@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -106,7 +107,29 @@ def encode_texts(
     return rows
 
 
-def rerank_texts(query: str, documents: list[str], top_k: int) -> list[dict[str, Any]]:
+def env_str(key: str, fallback: str) -> str:
+    v = os.environ.get(key)
+    return v if v is not None and v != "" else fallback
+
+
+def env_int(key: str, fallback: int) -> int:
+    v = os.environ.get(key)
+    if v is None or v == "":
+        return fallback
+    try:
+        return int(v)
+    except ValueError:
+        return fallback
+
+
+def env_bool(key: str, fallback: bool) -> bool:
+    v = os.environ.get(key)
+    if v is None or v == "":
+        return fallback
+    return v.lower() in ("1", "true", "yes", "on")
+
+
+def rerank_texts(query: str, documents: list[str], top_k: int, max_length: int) -> list[dict[str, Any]]:
     global _reranker
     if _reranker is None:
         raise RuntimeError("reranker not loaded")
@@ -114,7 +137,10 @@ def rerank_texts(query: str, documents: list[str], top_k: int) -> list[dict[str,
         return []
     pairs = [[query, doc] for doc in documents]
     with _rerank_lock:
-        scores = _reranker.compute_score(pairs, normalize=True)
+        try:
+            scores = _reranker.compute_score(pairs, normalize=True, max_length=max_length)
+        except TypeError:
+            scores = _reranker.compute_score(pairs, normalize=True)
     if isinstance(scores, (int, float)):
         scores = [float(scores)]
     else:
@@ -206,13 +232,15 @@ class Handler(BaseHTTPRequestHandler):
             query = str(body.get("query") or "").strip()
             documents = list(body.get("documents") or [])
             top_k = int(body.get("top_k") or len(documents))
+            raw_max_length = body.get("max_length")
+            max_length = int(raw_max_length) if raw_max_length is not None else _default_max_length
             if not query:
                 self._json(400, {"error": {"message": "query is required"}})
                 return
             if not documents:
                 self._json(200, {"object": "list", "data": [], "model": _reranker_name})
                 return
-            data = rerank_texts(query, [str(doc) for doc in documents], top_k)
+            data = rerank_texts(query, [str(doc) for doc in documents], top_k, max_length)
             self._json(200, {"object": "list", "data": data, "model": _reranker_name})
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": {"message": str(exc)}})
@@ -225,20 +253,28 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(description="FlagEmbedding BGE-M3 OpenAI-compatible server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8091)
-    parser.add_argument("--model", default="BAAI/bge-m3", help="HF model id or local path")
-    parser.add_argument("--rerank-model", default="BAAI/bge-reranker-v2-m3", help="HF reranker id or local path")
+    parser.add_argument("--host", default=env_str("FLUXSEARCH_FLAGEMBEDDING_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=env_int("FLUXSEARCH_FLAGEMBEDDING_PORT", 8091))
+    parser.add_argument("--model", default=env_str("FLUXSEARCH_FLAGEMBEDDING_MODEL", "BAAI/bge-m3"), help="HF model id or local path")
+    parser.add_argument(
+        "--rerank-model",
+        default=env_str("FLUXSEARCH_FLAGEMBEDDING_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+        help="HF reranker id or local path",
+    )
     parser.add_argument("--no-reranker", action="store_true", help="Skip loading reranker model")
-    parser.add_argument("--device", default="", help="Dense embedding + reranker device: cuda / cpu (default: auto)")
+    parser.add_argument("--device", default=env_str("FLUXSEARCH_FLAGEMBEDDING_DEVICE", ""), help="Dense embedding + reranker device: cuda / cpu (default: auto)")
     parser.add_argument(
         "--sparse-device",
-        default="",
+        default=env_str("FLUXSEARCH_FLAGEMBEDDING_SPARSE_DEVICE", ""),
         help="Sparse (lexical) embedding device; if set, loads a second BGE-M3 on this device for sparse only",
     )
     parser.add_argument("--fp16", action="store_true", help="Use fp16 when CUDA is available")
-    parser.add_argument("--max-length", type=int, default=512)
+    parser.add_argument("--max-length", type=int, default=env_int("FLUXSEARCH_FLAGEMBEDDING_MAX_LENGTH", 512))
     args = parser.parse_args()
+    if "--fp16" not in sys.argv and env_bool("FLUXSEARCH_FLAGEMBEDDING_FP16", False):
+        args.fp16 = True
+    if "--no-reranker" not in sys.argv and env_bool("FLUXSEARCH_FLAGEMBEDDING_NO_RERANKER", False):
+        args.no_reranker = True
 
     global _model, _sparse_model, _model_name, _reranker, _reranker_name, _default_max_length
     _model_name = args.model.split("/")[-1] if "/" in args.model else args.model

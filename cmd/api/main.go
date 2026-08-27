@@ -10,7 +10,11 @@ import (
 func main() {
 	addr := os.Getenv("FLUXSEARCH_API_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		if port := os.Getenv("FLUXSEARCH_API_PORT"); port != "" {
+			addr = ":" + port
+		} else {
+			addr = ":8080"
+		}
 	}
 
 	router := api.NewRouter()

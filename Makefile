@@ -1,5 +1,6 @@
 .PHONY: build build-api build-worker build-frontend run-api run-worker run-frontend dev test tidy \
-	run-flagembedding eval-download eval-import-smoke eval-run-smoke eval-import eval-run eval-setup-milvus eval-reset eval-reset-import scifact-download scifact-setup scifact-setup-milvus scifact-import-smoke scifact-run-smoke scifact-import scifact-run
+	run-flagembedding deploy-local stop-local deploy-local-ps1 stop-local-ps1 \
+	eval-download eval-import-smoke eval-run-smoke eval-import eval-run eval-setup-milvus eval-reset eval-reset-import scifact-download scifact-setup scifact-setup-milvus scifact-import-smoke scifact-run-smoke scifact-import scifact-run
 
 BIN_DIR := bin
 
@@ -27,7 +28,19 @@ run-api:
 	go run ./cmd/api
 
 run-flagembedding:
-	python scripts/flagembedding_server.py --port 8091 --device cuda --sparse-device cpu --fp16
+	python scripts/flagembedding_server.py
+
+deploy-local:
+	bash deploy/scripts/deploy-local.sh
+
+stop-local:
+	bash deploy/scripts/stop-local.sh
+
+deploy-local-ps1:
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/deploy-local.ps1
+
+stop-local-ps1:
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/stop-local.ps1
 
 run-worker:
 	go run ./cmd/worker

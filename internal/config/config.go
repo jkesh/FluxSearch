@@ -167,14 +167,24 @@ func chunkOverlapTokensFromEnv() int {
 }
 
 func loadEnvFiles() {
-	candidates := []string{
+	infraCandidates := []string{
 		"config/local/infra.env",
 		"../config/local/infra.env",
 		filepath.Join("..", "..", "config", "local", "infra.env"),
 	}
-	for _, path := range candidates {
+	for _, path := range infraCandidates {
 		if err := loadEnvFile(path); err == nil {
-			return
+			break
+		}
+	}
+	deployCandidates := []string{
+		"config/local/deploy.env",
+		"../config/local/deploy.env",
+		filepath.Join("..", "..", "config", "local", "deploy.env"),
+	}
+	for _, path := range deployCandidates {
+		if err := loadEnvFile(path); err == nil {
+			break
 		}
 	}
 }

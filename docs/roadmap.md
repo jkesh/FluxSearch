@@ -51,9 +51,9 @@
 
 - [x] Dense Retrieval（Milvus）
 - [x] Milvus Hybrid Search（FlagEmbedding BGE-M3 Sparse + Dense）
+- [x] Dense + BM25 可切换（加权 RRF，`search_mode=dense_bm25`）
 - [x] `internal/retrieval` 检索编排
 - [ ] 独立 Sparse 引擎（Bleve）
-- [ ] `internal/retrieval/fusion`：RRF 多路融合
 - [ ] Metadata Filter
 
 ## V3 — Reranking 🚧

@@ -1,6 +1,10 @@
 #!/bin/bash
 # 在服务器上运行（需 sudo）
 # 用法: sudo bash server-port-forward.sh
+#
+# 公网 IP 访问请优先使用:
+#   FLUXSEARCH_PUBLIC_IP=113.128.132.69 bash deploy/scripts/apply-external-access.sh
+# port-forward 与 externalIPs 不要同时占用 5432/6379 等端口。
 set -euo pipefail
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml

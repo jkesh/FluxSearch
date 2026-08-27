@@ -5,7 +5,7 @@ import subprocess
 import sys
 import paramiko
 
-HOST = os.environ.get("FLUXSEARCH_DEPLOY_HOST", "your-k8s-node.example.com")
+HOST = os.environ.get("FLUXSEARCH_DEPLOY_HOST", "113.128.132.69")
 USER = os.environ.get("FLUXSEARCH_DEPLOY_USER", "deploy")
 PASSWORD = os.environ.get("FLUXSEARCH_DEPLOY_PASSWORD", "")
 REMOTE_DIR = f"/home/{USER}/fluxsearch"

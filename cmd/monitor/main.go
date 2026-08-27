@@ -16,7 +16,11 @@ import (
 func main() {
 	addr := os.Getenv("FLUXSEARCH_MONITOR_ADDR")
 	if addr == "" {
-		addr = ":8090"
+		if port := os.Getenv("FLUXSEARCH_MONITOR_PORT"); port != "" {
+			addr = ":" + port
+		} else {
+			addr = ":8090"
+		}
 	}
 
 	cfg := config.Load()

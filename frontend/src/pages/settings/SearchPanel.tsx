@@ -112,14 +112,60 @@ export default function SearchPanel({ form, patch }: Props) {
       </Section>
 
       <Section title="检索默认参数">
-        <Field label="Hybrid 检索（Dense + Sparse）" hint="BGE-M3 专用；开启后需重建 Collection 并重嵌入">
-          <input
-            type="checkbox"
-            className="toggle toggle-primary"
-            checked={form.search_hybrid_enabled}
-            onChange={(e) => patch('search_hybrid_enabled', e.target.checked)}
-          />
+        <Field
+          label="检索模式"
+          hint="dense=仅向量；sparse_hybrid=BGE-M3 Dense+Sparse；dense_bm25=Dense+BM25 加权融合"
+        >
+          <select
+            className="select select-bordered select-sm w-full"
+            value={form.search_mode || (form.search_hybrid_enabled ? 'sparse_hybrid' : 'dense')}
+            onChange={(e) => {
+              const mode = e.target.value as AppSettings['search_mode']
+              patch('search_mode', mode)
+              if (mode === 'sparse_hybrid') {
+                patch('search_hybrid_enabled', true)
+              }
+            }}
+          >
+            <option value="dense">Dense（仅语义向量）</option>
+            <option value="sparse_hybrid">Sparse Hybrid（Dense + 学习型 Sparse）</option>
+            <option value="dense_bm25">Dense + BM25（可调权重）</option>
+          </select>
         </Field>
+
+        {form.search_mode === 'dense_bm25' && (
+          <>
+            <Field label={`Dense 权重：${Number(form.search_dense_weight ?? 0.5).toFixed(2)}`} hint="与 BM25 相对权重，无需归一化到 1">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="range range-primary range-sm"
+                value={form.search_dense_weight ?? 0.5}
+                onChange={(e) => patch('search_dense_weight', Number(e.target.value))}
+              />
+            </Field>
+            <Field label={`BM25 权重：${Number(form.search_bm25_weight ?? 0.5).toFixed(2)}`} hint="设为 0 则退化为仅 Dense；Dense 为 0 则仅 BM25">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="range range-primary range-sm"
+                value={form.search_bm25_weight ?? 0.5}
+                onChange={(e) => patch('search_bm25_weight', Number(e.target.value))}
+              />
+            </Field>
+          </>
+        )}
+
+        {form.search_mode === 'sparse_hybrid' && (
+          <p className="text-xs text-base-content/50">
+            Sparse Hybrid 使用 BGE-M3 学习型稀疏向量，经 Milvus HybridSearch 融合。首次开启需重建 Collection。
+          </p>
+        )}
+
         <Field label="Cross-Encoder 重排" hint="召回后用 bge-reranker 精排">
           <input
             type="checkbox"

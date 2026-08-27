@@ -50,6 +50,16 @@ func DetectReindexPlan(before, after AppSettings) ReindexPlan {
 		reasons = append(reasons, "Hybrid 检索开关变更")
 	}
 
+	if before.EffectiveSearchMode() != after.EffectiveSearchMode() &&
+		after.EffectiveSearchMode() == SearchModeSparseHybrid &&
+		!before.SearchHybridEnabled {
+		plan.RecreateCollection = true
+		if !plan.RechunkAll {
+			plan.ReembedAll = true
+		}
+		reasons = append(reasons, "检索模式切换为 Sparse Hybrid")
+	}
+
 	if plan.RechunkAll {
 		plan.ReembedAll = false
 	}

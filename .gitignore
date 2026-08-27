@@ -3,6 +3,8 @@ config/local/infra.env
 config/local/infra.yaml
 config/local/infra.json
 config/local/app.settings.json
+config/local/deploy.env
+.deploy/
 *.local.env
 *.local.yaml
 *.local.json

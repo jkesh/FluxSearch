@@ -1,0 +1,24 @@
+# FluxSearch K8s 服务外网访问补丁
+# 由 deploy/scripts/apply-external-access.sh 应用；也可 kubectl apply -f
+#
+# 说明: externalIPs 需与节点公网 IP 一致；IP 变更时重新 apply 或运行脚本
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluxsearch-external-access
+  namespace: fluxsearch
+  labels:
+    app.kubernetes.io/part-of: fluxsearch
+data:
+  public_ip: "113.128.132.69"
+  postgres: "113.128.132.69:5432"
+  redis: "113.128.132.69:6379"
+  minio: "113.128.132.69:9000"
+  milvus: "113.128.132.69:19530"
+  etcd: "113.128.132.69:2379"
+  monitor_host: "http://113.128.132.69:8090/api/v1/status"
+  monitor_nodeport: "http://113.128.132.69:30090/api/v1/status"
+  notes: |
+    ClusterIP 服务通过 externalIPs 在标准端口暴露。
+    勿与 kubectl port-forward 同时占用相同端口。
+    云安全组需放行 5432,6379,9000,19530,2379,8090,30090。

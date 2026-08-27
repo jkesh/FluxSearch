@@ -232,3 +232,7 @@ helm list -n fluxsearch 2>/dev/null || true
 kubectl get secret fluxsearch-infra -n fluxsearch
 echo ""
 echo "=== ALL DONE ==="
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLUXSEARCH_PUBLIC_IP="${FLUXSEARCH_PUBLIC_IP:-113.128.132.69}"
+echo "=== 配置外网访问 (${FLUXSEARCH_PUBLIC_IP}) ==="
+bash "${SCRIPT_DIR}/apply-external-access.sh"

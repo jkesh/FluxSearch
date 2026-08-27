@@ -107,7 +107,7 @@ POST /api/v1/search
 }
 ```
 
-`mode` 取值：`dense` / `hybrid` / `dense+rerank` / `hybrid+rerank`，取决于设置页 Hybrid / Rerank 开关。
+`mode` 取值：`dense` / `sparse_hybrid` / `dense_bm25` / `bm25`，以及带 `+rerank` 后缀的变体。由设置项 `search_mode` 与 Dense/BM25 权重决定。
 
 ---
 

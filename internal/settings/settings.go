@@ -38,7 +38,10 @@ type AppSettings struct {
 
 	SearchTopK           int     `json:"search_top_k"`
 	SearchScoreThreshold float64 `json:"search_score_threshold"`
+	SearchMode           string  `json:"search_mode"` // dense | sparse_hybrid | dense_bm25
 	SearchHybridEnabled  bool    `json:"search_hybrid_enabled"`
+	SearchDenseWeight    float64 `json:"search_dense_weight"`
+	SearchBM25Weight     float64 `json:"search_bm25_weight"`
 	SearchRecallK        int     `json:"search_recall_k"`
 	SearchRerankEnabled  bool    `json:"search_rerank_enabled"`
 	RerankAPIURL         string  `json:"rerank_api_url"`
@@ -144,7 +147,10 @@ func (m *Manager) defaultsFromEnv() AppSettings {
 
 		SearchTopK:           envInt("FLUXSEARCH_SEARCH_TOP_K", 5),
 		SearchScoreThreshold: envFloat("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", 0),
+		SearchMode:           envOr("FLUXSEARCH_SEARCH_MODE", ""),
 		SearchHybridEnabled:  envBool("FLUXSEARCH_SEARCH_HYBRID_ENABLED", false),
+		SearchDenseWeight:    envFloat("FLUXSEARCH_SEARCH_DENSE_WEIGHT", 0.5),
+		SearchBM25Weight:     envFloat("FLUXSEARCH_SEARCH_BM25_WEIGHT", 0.5),
 		SearchRecallK:        envInt("FLUXSEARCH_SEARCH_RECALL_K", DefaultSearchRecallK),
 		SearchRerankEnabled:  envBool("FLUXSEARCH_SEARCH_RERANK_ENABLED", false),
 		RerankModel:          envOr("FLUXSEARCH_RERANK_MODEL", "bge-reranker-v2-m3"),
@@ -257,6 +263,17 @@ func (m *Manager) mergeFile(file *AppSettings) {
 		m.data.SearchScoreThreshold = file.SearchScoreThreshold
 	}
 	m.data.SearchHybridEnabled = file.SearchHybridEnabled
+	if file.SearchMode != "" {
+		m.data.SearchMode = file.SearchMode
+	} else {
+		m.data.SearchMode = NormalizeSearchMode("", file.SearchHybridEnabled)
+	}
+	if file.SearchDenseWeight > 0 {
+		m.data.SearchDenseWeight = file.SearchDenseWeight
+	}
+	if file.SearchBM25Weight > 0 {
+		m.data.SearchBM25Weight = file.SearchBM25Weight
+	}
 	if file.SearchRecallK > 0 {
 		m.data.SearchRecallK = file.SearchRecallK
 	}
@@ -325,7 +342,7 @@ func (m *Manager) PublicView(embeddingReady bool, embeddingStatus string, reinde
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	view := PublicView{
-		AppSettings:        m.data.withMilvusDefaults().withDedupDefaults(),
+		AppSettings:        m.data.withMilvusDefaults().withDedupDefaults().withSearchDefaults(),
 		SettingsPath:       m.path,
 		EmbeddingAPIKeySet: m.data.EmbeddingAPIKey != "",
 		LLMAPIKeySet:       m.data.LLMAPIKey != "",
@@ -364,7 +381,10 @@ type UpdateInput struct {
 
 	SearchTopK           *int     `json:"search_top_k"`
 	SearchScoreThreshold *float64 `json:"search_score_threshold"`
+	SearchMode           *string  `json:"search_mode"`
 	SearchHybridEnabled  *bool    `json:"search_hybrid_enabled"`
+	SearchDenseWeight    *float64 `json:"search_dense_weight"`
+	SearchBM25Weight     *float64 `json:"search_bm25_weight"`
 	SearchRecallK        *int     `json:"search_recall_k"`
 	SearchRerankEnabled  *bool    `json:"search_rerank_enabled"`
 	RerankAPIURL         *string  `json:"rerank_api_url"`
@@ -440,6 +460,19 @@ func (m *Manager) Update(in UpdateInput) error {
 	}
 	if in.SearchHybridEnabled != nil {
 		m.data.SearchHybridEnabled = *in.SearchHybridEnabled
+	}
+	if in.SearchMode != nil {
+		mode := NormalizeSearchMode(*in.SearchMode, m.data.SearchHybridEnabled)
+		m.data.SearchMode = mode
+		if mode == SearchModeSparseHybrid {
+			m.data.SearchHybridEnabled = true
+		}
+	}
+	if in.SearchDenseWeight != nil && *in.SearchDenseWeight >= 0 {
+		m.data.SearchDenseWeight = *in.SearchDenseWeight
+	}
+	if in.SearchBM25Weight != nil && *in.SearchBM25Weight >= 0 {
+		m.data.SearchBM25Weight = *in.SearchBM25Weight
 	}
 	if in.SearchRecallK != nil && *in.SearchRecallK > 0 {
 		m.data.SearchRecallK = *in.SearchRecallK
@@ -536,7 +569,10 @@ func (m *Manager) applyToEnv(s AppSettings) {
 	setEnv("FLUXSEARCH_CHUNK_OVERLAP_TOKENS", strconv.Itoa(s.ChunkOverlapTokens))
 	setEnv("FLUXSEARCH_SEARCH_TOP_K", strconv.Itoa(s.SearchTopK))
 	setEnv("FLUXSEARCH_SEARCH_SCORE_THRESHOLD", strconv.FormatFloat(s.SearchScoreThreshold, 'f', -1, 64))
+	setEnv("FLUXSEARCH_SEARCH_MODE", s.EffectiveSearchMode())
 	setEnv("FLUXSEARCH_SEARCH_HYBRID_ENABLED", strconv.FormatBool(s.SearchHybridEnabled))
+	setEnv("FLUXSEARCH_SEARCH_DENSE_WEIGHT", strconv.FormatFloat(s.SearchDenseWeight, 'f', -1, 64))
+	setEnv("FLUXSEARCH_SEARCH_BM25_WEIGHT", strconv.FormatFloat(s.SearchBM25Weight, 'f', -1, 64))
 	setEnv("FLUXSEARCH_SEARCH_RECALL_K", strconv.Itoa(s.SearchRecallK))
 	setEnv("FLUXSEARCH_SEARCH_RERANK_ENABLED", strconv.FormatBool(s.SearchRerankEnabled))
 	setEnv("FLUXSEARCH_RERANK_API_URL", s.RerankAPIURL)
